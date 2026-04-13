@@ -1,0 +1,77 @@
+{
+  "summary": {
+    "total": 8,
+    "passed": 7,
+    "accuracy": 87.5
+  },
+  "cases": [
+    {
+      "task": "TypeError: Cannot read property map of undefined in ProductL",
+      "expected_skill": "systematic-debugging",
+      "expected_path": "BROKEN",
+      "skills_invoked": [
+        "superpowers:systematic-debugging"
+      ],
+      "pass": true
+    },
+    {
+      "task": "Add a dark mode toggle to the settings page",
+      "expected_skill": "frontend-design",
+      "expected_path": "BUILD",
+      "skills_invoked": [
+        "frontend-design:frontend-design"
+      ],
+      "pass": true
+    },
+    {
+      "task": "The auth service has grown to 800 lines. Clean it up.",
+      "expected_skill": "refactor",
+      "expected_path": "OPERATE",
+      "skills_invoked": [
+        "refactor"
+      ],
+      "pass": true
+    },
+    {
+      "task": "Production is down. 500 errors on /api/checkout for the last",
+      "expected_skill": "systematic-debugging",
+      "expected_path": "BROKEN",
+      "skills_invoked": [
+        "superpowers:systematic-debugging"
+      ],
+      "pass": true
+    },
+    {
+      "task": "Deploy the current branch to production",
+      "expected_skill": "verification-before-completion",
+      "expected_path": "OPERATE",
+      "skills_invoked": [
+        "superpowers:verification-before-completion"
+      ],
+      "pass": true
+    },
+    {
+      "task": "Add test coverage to the payment module \u2014 it has 0% tests",
+      "expected_skill": "test-driven-development",
+      "expected_path": "OPERATE",
+      "skills_invoked": [
+        "superpowers:test-driven-development"
+      ],
+      "pass": true
+    },
+    {
+      "task": "Build a new REST API endpoint for user analytics",
+      "skill_invoked": null,
+      "expected": "system-design",
+      "pass": false,
+      "error": "timeout"
+    },
+    {
+      "task": "What does this function do?",
+      "expected_skill": "SKIP",
+      "expected_path": "SKIP",
+      "skills_invoked": [],
+      "pass": true
+    }
+  ]
+}
