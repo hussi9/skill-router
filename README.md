@@ -13,10 +13,26 @@ Claude Code has access to hundreds of skills — but it picks the wrong one 20-3
 **You type:** *"The login endpoint is returning 500 errors in production"*
 
 **Without skills-master:**
-Claude launches `brainstorming`, spends 2 minutes ideating on architecture, eventually reads the error. Uses `opus` the whole time. Cost: ~$0.40. Time: 3 minutes.
+Claude launches `brainstorming`, spends time ideating on architecture, eventually reads the error. Uses `opus` the whole time.
 
 **With skills-master:**
-Q1 fires: something is broken → `systematic-debugging` + `sonnet`. Reads the error, traces the stack, applies the fix. Cost: ~$0.06. Time: 45 seconds.
+Q1 fires: something is broken → `systematic-debugging` + `sonnet`. Reads the error, traces the stack, applies the fix. Right skill, right model, first time.
+
+## Measured Results
+
+Tested via `claude -p` CLI on 20 real-world task prompts:
+
+| Dimension | Score |
+|-----------|-------|
+| Overall (path + skill + model) | 18/20 **(90%)** |
+| Path routing | 19/20 (95%) |
+| Skill selection | 19/20 (95%) |
+| Model selection | 19/20 (95%) |
+| Skill tool actually fires correctly | 7/8 **(88%)** |
+
+The 2 misses share one root cause: auth-adjacent task wording incorrectly triggering the "auth → opus" escalation rule. Fixable with a tighter signal.
+
+Test harness is in the repo — run `bash run_routing_test.sh` against your own setup.
 
 ---
 
