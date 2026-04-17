@@ -1,15 +1,15 @@
 ---
-name: skills-master-core
-description: Universal routing core for Claude Code. 3-question triage → domain routing → Skill + Agent + Model. Drop into any Claude Code setup. Works standalone or as the base for a personal override layer.
+name: skills-master
+description: INVOKE BEFORE EVERY NON-TRIVIAL TASK — before writing code, before using any tool, before answering. Do not skip. Produces the required Skill + Agent + Model for the task. Routing engine for 2,700+ skills.
 ---
 
-# Skills Master — Universal Core
+# Skills Master — Universal Router
 
-> Before any non-trivial task: run this. Always produces one answer.
+**Output always:** `Skill + Agent + Model`
 
 ---
 
-## THE 3-QUESTION TRIAGE
+## THE 3-QUESTION TRIAGE (run now, takes 5 seconds)
 
 ```
 Q1: Is something BROKEN / WRONG / FAILING?
@@ -20,13 +20,10 @@ Q2: Is this CREATE / BUILD / ADD something new?
     New feature, file, component, integration, page, script
     YES → BUILD PATH
 
-Q3: Everything else (improve, ship, configure, automate, research, resume)
+Q3: Everything else (improve, ship, configure, automate, research)
     → OPERATE PATH
 
-AMBIGUOUS (spans 2 paths)?
-    → Default to the HIGHER-COMPLEXITY path
-    "Fix AND add feature" → BUILD PATH
-    "Refactor AND deploy" → BUILD PATH (treat deploy as part of it)
+AMBIGUOUS? → Default to HIGHER-COMPLEXITY path
 ```
 
 ---
@@ -77,27 +74,16 @@ AMBIGUOUS (spans 2 paths)?
 | Got review feedback | `superpowers:receiving-code-review` | general-purpose | sonnet |
 | Deploy | `superpowers:verification-before-completion` → `vercel:deploy` | general-purpose | sonnet |
 | Merge / PR / push | `superpowers:finishing-a-development-branch` | general-purpose | sonnet |
-| Env var / secret | check secrets manager → `vercel:env` | general-purpose | sonnet |
 | DB migration | `db-expert` | db-expert | sonnet |
-| Cron / scheduled job | `schedule` skill | general-purpose | sonnet |
-| 3rd-party connect | composio skill → `connect-apps` | integration-specialist | sonnet |
-| Research / docs lookup | context7 → `brainstorming` | general-purpose | sonnet |
-| Resume previous work | read task list → `superpowers:executing-plans` | general-purpose | sonnet |
-| Update CLAUDE.md | `claude-md-management:revise-claude-md` | general-purpose | sonnet |
 | 2+ independent tasks | `superpowers:dispatching-parallel-agents` | general-purpose | sonnet |
+| Resume previous work | `superpowers:executing-plans` | general-purpose | sonnet |
+| Research / docs lookup | context7 → `brainstorming` | general-purpose | sonnet |
 
 ---
 
-## COMPLEXITY RULE
+## WHEN NO SKILL IS NEEDED
 
-```
-1 domain  → 1 skill
-2+ domains → announce chain, run in order
-
-ANNOUNCE:
-"This touches [N] domains. Chain: [skill1] → [skill2] → ...
-Invoking step 1 now."
-```
+Single-line fix · reading code · one factual question · one command · under 3 trivial steps
 
 ---
 
@@ -114,29 +100,28 @@ Before any "done" claim → `superpowers:verification-before-completion`
 
 ---
 
-## WHEN NO SKILL IS NEEDED
+## COMPLEXITY RULE
 
-Single-line fix · reading code · one factual question · one command · under 3 trivial steps
+```
+1 domain  → 1 skill
+2+ domains → announce chain, run in order
+
+"This touches [N] domains. Chain: [skill1] → [skill2] → ...
+Invoking step 1 now."
+```
 
 ---
 
-## SKILL REGISTRY
+## PERSONAL OVERRIDES
 
-New skills installed? Run this once per session:
+Add project-specific routing on top of this file:
 
-```
-Check: ls -lt ~/.agent/skills/ | head -5
-Check: ls -lt ~/.claude/skills/ | head -5
-For each new skill: read first 5 lines of SKILL.md
-Does it apply to today's work? → use it
-Better than an existing routing entry? → use it instead
+```bash
+curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/SKILL.personal.md \
+  > ~/.claude/skills/skills-master/SKILL.personal.md
 ```
 
-Add new routing permanently:
-```
-claude-md-management:revise-claude-md
-"Add [skill] to skills-master under [section] for signal: [trigger]"
-```
+Edit `SKILL.personal.md` with your project signals. Your rules win over the core (CSS cascade model).
 
 ---
 
@@ -144,9 +129,20 @@ claude-md-management:revise-claude-md
 
 ```
 1. ls ~/.agent/skills/ | grep -iE '<keyword>'        ← Antigravity (860+)
-2. ls ~/.claude/skills/ | grep -iE '<keyword>'       ← Composio + custom
+2. ls ~/.claude/skills/ | grep -iE '<keyword>'       ← installed custom skills
 3. WebFetch Antigravity README → npx antigravity-awesome-skills
 4. WebSearch: site:github.com "SKILL.md" claude <keyword>
 5. git clone --depth 1 <url> /tmp/s && cp SKILL.md → ~/.claude/skills/<name>/
 6. superpowers:writing-skills → write it yourself
+```
+
+---
+
+## RED FLAGS — Signs You're About to Skip This
+
+```
+"This is simple"          → Simple things take 5s to route. Skip routing = hours wasted.
+"I know what to do"       → Then routing confirms it. 5s cost, 0 downside.
+"No match in the table"   → Pick closest OR run Discovery Protocol.
+"Ambiguous task"          → Default to higher-complexity path (BUILD).
 ```

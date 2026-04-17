@@ -1,0 +1,26 @@
+{
+  "_comment": "Add these entries to your ~/.claude/settings.json hooks section.",
+  "_comment2": "The PostToolUse hook logs every Skill invocation to ~/.claude/skill_usage.log.",
+  "_comment3": "The statusline.sh reads that log to show the active skill in the status bar.",
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "skill=$(echo $CLAUDE_TOOL_INPUT | jq -r '.skill // empty'); if [[ -n \"$skill\" ]]; then echo \"$(date '+%Y-%m-%d %H:%M:%S')\t$skill\" >> ~/.claude/skill_usage.log; fi",
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh",
+    "padding": 2
+  }
+}

@@ -67,26 +67,96 @@ Model selection is part of routing — not a separate decision. Simple file read
 
 ## Install
 
+### 1. Install the skill (required)
+
 ```bash
 mkdir -p ~/.claude/skills/skills-master
 curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/SKILL.md \
   > ~/.claude/skills/skills-master/SKILL.md
 ```
 
-That's it. Claude Code loads it automatically. You never invoke it manually — it runs before every non-trivial task.
+Claude Code loads it automatically. You never invoke it manually — it runs before every non-trivial task.
 
----
-
-## Add Personal Overrides (Optional)
-
-The core routes 90% of tasks correctly for anyone. For project-specific routing, copy the personal template:
+### 2. Add personal overrides (optional)
 
 ```bash
 curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/SKILL.personal.md \
   > ~/.claude/skills/skills-master/SKILL.personal.md
 ```
 
-Edit it to add your own project routing. The core runs first, your overrides layer on top — same model as CSS specificity.
+Edit it to add project-specific routing. The core runs first, your overrides layer on top (CSS cascade model).
+
+### 3. Status bar with active skill indicator (optional)
+
+See which skill is active directly in your Claude Code status line:
+
+```
+◆ sonnet · ~/myproject · ⎇ main · ⚙ systematic-debugging · ▓▓░░░░░░░░ 20% · $0.03
+```
+
+**Install the statusline:**
+
+```bash
+curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/statusline.sh \
+  > ~/.claude/statusline.sh
+chmod +x ~/.claude/statusline.sh
+```
+
+**Add to `~/.claude/settings.json`** (merge with your existing hooks):
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "skill=$(echo $CLAUDE_TOOL_INPUT | jq -r '.skill // empty'); if [[ -n \"$skill\" ]]; then echo \"$(date '+%Y-%m-%d %H:%M:%S')\t$skill\" >> ~/.claude/skill_usage.log; fi",
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh",
+    "padding": 2
+  }
+}
+```
+
+The full hook snippet is in `settings-hooks.json` in this repo.
+
+**What each segment means:**
+
+| Segment | Meaning |
+|---------|---------|
+| `◆` / `◈` / `◉` / `⚡` | mood — context fill / cost level |
+| `sonnet` | active model |
+| `~/myproject` | working directory |
+| `⎇ main✱3` | git branch + dirty file count |
+| `⚙ systematic-debugging` | last skill invoked (shown 120s) |
+| `▓▓░░░░░░░░ 20%` | context window fill |
+| `4t` | turn count |
+| `$0.03` | session cost |
+| `1:42` | session duration |
+| `+47 −12` | lines added / removed |
+
+**View your skill usage log:**
+
+```bash
+# All skills used
+cat ~/.claude/skill_usage.log
+
+# Most used skills
+sort ~/.claude/skill_usage.log | uniq -c -f1 | sort -rn
+
+# skills-master invocations only
+grep skills-master ~/.claude/skill_usage.log | wc -l
+```
 
 ---
 
@@ -133,7 +203,7 @@ No match in the routing table? It walks a discovery protocol:
 The CSS cascade model:
 
 ```
-Universal core rules     (this repo)
+Universal core rules     (SKILL.md — this repo)
         +
 Personal overrides       (your SKILL.personal.md)
         =
@@ -142,7 +212,7 @@ Your routing config
 
 Override any routing entry. Add project-specific signals. Your rules always win.
 
-See [SKILL.personal.md](./SKILL.personal.md) for a documented template.
+See [SKILL.personal.md](./SKILL.personal.md) for the template.
 
 ---
 
