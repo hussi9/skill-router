@@ -112,6 +112,39 @@ Invoking step 1 now."
 
 ---
 
+## CATALOG CHECK — Always Run After Triage (Key Differentiator)
+
+**After routing to a skill from the tables above, check for a more specific match:**
+
+```
+keyword = core noun from the task (e.g., "kubernetes", "stripe", "threejs", "langchain")
+
+Step 1 — LOCAL CATALOG (fast, run first):
+  ls ~/.agent/skills/ | grep -iE '<keyword>'      ← 1,400+ Antigravity skills
+  ls ~/.claude/skills/ | grep -iE '<keyword>'     ← your installed custom skills
+  ls ~/.composio-skills/composio-skills/ | grep -iE '<keyword>'  ← 940+ integrations
+
+  If a more specific match exists → USE IT instead of the generic routing table entry.
+  Example: task is "add Stripe webhooks" → table says "integration-specialist"
+           but ls finds "stripe-automation" → use stripe-automation instead.
+
+Step 2 — ONLINE CATALOG (run if Step 1 has no match):
+  WebSearch: site:github.com "SKILL.md" claude <keyword>
+  → If a repo with SKILL.md exists:
+    git clone --depth 1 <url> ~/.claude/skills/<skill-name>/
+    Then invoke the newly installed skill.
+
+Step 3 — GENERATE (last resort):
+  superpowers:writing-skills → write a custom skill for this task
+```
+
+**When to skip the catalog check:**
+- The routing table already gives you a highly specific skill (e.g., `systematic-debugging`)
+- Single-line fix or trivial command
+- The keyword is too generic to produce useful results (e.g., "code", "file", "text")
+
+---
+
 ## PERSONAL OVERRIDES
 
 Add project-specific routing on top of this file:
@@ -125,24 +158,12 @@ Edit `SKILL.personal.md` with your project signals. Your rules win over the core
 
 ---
 
-## NO MATCH? DISCOVERY PROTOCOL
-
-```
-1. ls ~/.agent/skills/ | grep -iE '<keyword>'        ← Antigravity (860+)
-2. ls ~/.claude/skills/ | grep -iE '<keyword>'       ← installed custom skills
-3. WebFetch Antigravity README → npx antigravity-awesome-skills
-4. WebSearch: site:github.com "SKILL.md" claude <keyword>
-5. git clone --depth 1 <url> /tmp/s && cp SKILL.md → ~/.claude/skills/<name>/
-6. superpowers:writing-skills → write it yourself
-```
-
----
-
 ## RED FLAGS — Signs You're About to Skip This
 
 ```
 "This is simple"          → Simple things take 5s to route. Skip routing = hours wasted.
 "I know what to do"       → Then routing confirms it. 5s cost, 0 downside.
-"No match in the table"   → Pick closest OR run Discovery Protocol.
+"No match in table"       → Run Catalog Check above before giving up.
 "Ambiguous task"          → Default to higher-complexity path (BUILD).
+"I already know the skill" → Still run catalog check — a better one may exist.
 ```

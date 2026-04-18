@@ -1,6 +1,10 @@
 # skills-master
 
+![skills-master routing diagram](assets/skills-master-visual.png)
+
 **Consistent skill routing for Claude Code. One file. Zero configuration.**
+
+> If this saves you time, a ⭐ on GitHub helps others find it.
 
 Claude Code has access to hundreds of skills — but it picks the wrong one 20-30% of the time. It rationalizes skipping skills entirely. It burns `opus` tokens on tasks that need `haiku`. It fires `brainstorming` when you just need `systematic-debugging`.
 
@@ -177,24 +181,37 @@ Full routing table is in [SKILL.md](./SKILL.md).
 ## Works With 2,700+ Skills
 
 - **Superpowers** — process discipline skills (`brainstorming`, `systematic-debugging`, `verification-before-completion`, etc.)
-- **Antigravity** — 860+ domain skills (`react-patterns`, `typescript-expert`, `seo-audit`, `langgraph`, etc.)
-- **Composio** — 944+ SaaS integrations (`stripe-automation`, `slack-automation`, etc.)
-- **Community** — any GitHub repo with a `SKILL.md` (auto-discovered)
-
-New skills installed? The registry check runs each session and incorporates them automatically.
+- **Antigravity** — 1,400+ domain skills (`react-patterns`, `typescript-expert`, `seo-audit`, `langgraph`, etc.)
+- **Composio** — 940+ SaaS integrations (`stripe-automation`, `slack-automation`, etc.)
+- **Community** — any GitHub repo with a `SKILL.md` (auto-discovered and installed)
 
 ---
 
-## Skill Discovery
+## Skill Discovery — The Key Differentiator
 
-No match in the routing table? It walks a discovery protocol:
+New skills are published to GitHub daily. skills-master keeps you current without manual tracking.
 
-1. Searches locally installed skills
-2. Checks the Antigravity catalog (860+ skills)
-3. Searches Composio (944+ integrations)
-4. Searches GitHub for repos with `SKILL.md`
-5. Auto-downloads and installs matching skill
-6. Falls back to writing a custom skill
+**How it works — on every non-trivial task:**
+
+```
+1. Route via the 3-question triage (BROKEN / BUILD / OPERATE)
+2. Check local catalog for a more specific match:
+   ls ~/.agent/skills/ | grep -iE '<keyword>'        ← 1,400+ Antigravity skills
+   ls ~/.composio-skills/ | grep -iE '<keyword>'     ← 940+ Composio integrations
+   ls ~/.claude/skills/ | grep -iE '<keyword>'       ← your custom skills
+3. If a better/more specific skill exists → use it instead
+4. If no local match → search GitHub for "SKILL.md" claude <keyword>
+5. Auto-clone and install the matching skill
+6. Invoke it immediately
+```
+
+**Example:** You ask "help me optimize my Kubernetes pod scheduling."
+- Table routes to `system-design` (generic)
+- Catalog check finds `kubernetes-expert` in Antigravity
+- skills-master uses `kubernetes-expert` instead
+- You get specialist-level guidance without knowing the skill existed
+
+This is why 48 people installed skills-master in the first week without a star prompt.
 
 ---
 
@@ -221,7 +238,7 @@ See [SKILL.personal.md](./SKILL.personal.md) for the template.
 - **Zero UX** — you never invoke skills-master. You type normally, Claude routes correctly.
 - **Deterministic** — same input always produces same output. No vibes-based routing.
 - **Fail safe** — ambiguous tasks default to the higher-complexity path. Over-routing beats under-routing.
-- **Living** — scans for newly installed skills each session. Install a skill, it routes to it.
+- **Living** — checks local + GitHub catalogs on every task. Install a new skill, it routes to it immediately.
 - **One file** — no build step, no config, no dependencies. Drop it in and forget it.
 
 ---

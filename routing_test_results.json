@@ -1,0 +1,443 @@
+{
+  "summary": {
+    "total": 20,
+    "passed": 10,
+    "accuracy": 50.0,
+    "path_accuracy": 65.0,
+    "skill_accuracy": 80.0,
+    "model_accuracy": 90.0,
+    "input_tokens": 30932,
+    "output_tokens": 1190,
+    "cost_usd": 0.0
+  },
+  "cases": [
+    {
+      "description": "JS error \u2192 BROKEN path",
+      "error": "timed out",
+      "score": {
+        "all_correct": false,
+        "path_correct": false,
+        "skill_correct": false,
+        "model_correct": false
+      }
+    },
+    {
+      "description": "failing tests \u2192 BROKEN path",
+      "prompt": "My test suite is failing after the refactor \u2014 12 tests red",
+      "expected": {
+        "path": "BROKEN",
+        "skill": "test-runner",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BROKEN|BUILD|OPERATE|SKIP",
+        "skill": "superpowers:systematic-debugging",
+        "agent": "general-purpose",
+        "model": "sonnet",
+        "reasoning": "The test suite failing after a refactor indicates an issue that needs debugging, which falls under the broken path."
+      },
+      "score": {
+        "path_correct": false,
+        "skill_correct": false,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "production incident \u2192 opus model",
+      "prompt": "Production is down. 500 errors on /api/checkout for the last 10 minutes",
+      "expected": {
+        "path": "BROKEN",
+        "skill": "systematic-debugging",
+        "model": "opus"
+      },
+      "actual": {
+        "path": "BROKEN|BUILD|OPERATE|SKIP",
+        "skill": "superpowers:systematic-debugging",
+        "agent": "general-purpose",
+        "model": "opus",
+        "reasoning": "The task indicates a production issue that needs to be fixed, which falls under the BROKEN path."
+      },
+      "score": {
+        "path_correct": false,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "TS errors \u2192 BROKEN path",
+      "prompt": "TypeScript is throwing 47 type errors after I updated the auth types",
+      "expected": {
+        "path": "BROKEN",
+        "skill": "typescript-expert",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BROKEN|BUILD|OPERATE|SKIP",
+        "skill": "typescript-expert",
+        "agent": "general-purpose",
+        "model": "sonnet",
+        "reasoning": "TypeScript errors need a TypeScript expert to resolve."
+      },
+      "score": {
+        "path_correct": false,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "deploy fail \u2192 BROKEN path",
+      "prompt": "The deploy failed \u2014 Vercel build error in CI pipeline",
+      "expected": {
+        "path": "BROKEN",
+        "skill": "systematic-debugging",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BROKEN|BUILD|OPERATE|SKIP",
+        "skill": "superpowers:systematic-debugging",
+        "agent": "general-purpose",
+        "model": "sonnet",
+        "reasoning": "The task involves a deploy failure, which is an error that needs debugging."
+      },
+      "score": {
+        "path_correct": false,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "production critical \u2192 opus model",
+      "prompt": "CRITICAL: database corrupted in production, users losing data right now",
+      "expected": {
+        "path": "BROKEN",
+        "skill": "systematic-debugging",
+        "model": "opus"
+      },
+      "actual": {
+        "path": "BROKEN|BUILD|OPERATE|SKIP",
+        "skill": "superpowers:systematic-debugging",
+        "agent": "general-purpose",
+        "model": "opus",
+        "reasoning": "Database corruption is a critical issue that needs immediate attention and debugging."
+      },
+      "score": {
+        "path_correct": false,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "new UI feature \u2192 BUILD path",
+      "prompt": "Add a dark mode toggle to the settings page",
+      "expected": {
+        "path": "BUILD",
+        "skill": "frontend-design",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "frontend-design:frontend-design",
+        "agent": "feature-dev:code-architect",
+        "model": "sonnet",
+        "reasoning": "Adding a new feature (dark mode toggle) requires designing and implementing UI changes."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "new API endpoint \u2192 BUILD path",
+      "prompt": "Build a new REST API endpoint for user analytics",
+      "expected": {
+        "path": "BUILD",
+        "skill": "system-design",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "system-design",
+        "agent": "feature-dev:code-architect",
+        "model": "sonnet",
+        "reasoning": "Creating a new feature (REST API endpoint) falls under the BUILD path."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "new integration \u2192 BUILD path",
+      "prompt": "I need to integrate Stripe payments into checkout",
+      "expected": {
+        "path": "BUILD",
+        "skill": "stripe",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "composio skill for that app",
+        "agent": "integration-specialist",
+        "model": "sonnet",
+        "reasoning": "Integrating a payment gateway involves adding new functionality, thus it falls under the BUILD path."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": false,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "new schema \u2192 BUILD path",
+      "prompt": "Create a new database schema for the notifications system",
+      "expected": {
+        "path": "BUILD",
+        "skill": "db-expert",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "db-expert",
+        "agent": "db-expert",
+        "model": "sonnet",
+        "reasoning": "Creating a new database schema is a build task that involves designing and implementing a new feature."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "new skill file \u2192 BUILD path",
+      "prompt": "Write a new Claude skill file for ML model routing",
+      "expected": {
+        "path": "BUILD",
+        "skill": "writing-skills",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "brainstorming",
+        "agent": "feature-dev:code-architect",
+        "model": "sonnet",
+        "reasoning": "Creating a new feature requires brainstorming and then going to the domain skill for coding."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": false,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "refactor existing code \u2192 OPERATE path",
+      "prompt": "The auth service has grown to 800 lines. Clean it up.",
+      "expected": {
+        "path": "OPERATE",
+        "skill": "refactor",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "OPERATE",
+        "skill": "refactor",
+        "agent": "code-simplifier:code-simplifier",
+        "model": "sonnet",
+        "reasoning": "Refactoring a large codebase is part of the operate path."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "add tests \u2192 OPERATE path",
+      "prompt": "Add test coverage to the payment module \u2014 it has 0% tests",
+      "expected": {
+        "path": "OPERATE",
+        "skill": "test-driven-development",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "superpowers:test-driven-development",
+        "agent": "test-runner",
+        "model": "sonnet",
+        "reasoning": "Adding test coverage is a new feature that requires creating tests, which falls under the BUILD path."
+      },
+      "score": {
+        "path_correct": false,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "deploy \u2192 OPERATE path",
+      "prompt": "Deploy the current branch to production",
+      "expected": {
+        "path": "OPERATE",
+        "skill": "verification-before-completion",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "OPERATE",
+        "skill": "superpowers:verification-before-completion",
+        "agent": "general-purpose",
+        "model": "sonnet",
+        "reasoning": "Deployment involves verifying before completion, which is part of the operate path."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "PR review \u2192 OPERATE path",
+      "prompt": "Review my PR before I merge",
+      "expected": {
+        "path": "OPERATE",
+        "skill": "requesting-code-review",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "OPERATE",
+        "skill": "superpowers:requesting-code-review",
+        "agent": "superpowers:code-reviewer",
+        "model": "sonnet",
+        "reasoning": "Code review is part of the operate path as it involves ensuring the code meets quality standards before merging."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "fix+add is ambiguous \u2192 BUILD (higher complexity default)",
+      "prompt": "Fix the login bug AND add OAuth support while you're at it",
+      "expected": {
+        "path": "BUILD",
+        "skill": "brainstorming",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "brainstorming",
+        "agent": "feature-dev:code-architect",
+        "model": "sonnet",
+        "reasoning": "The task involves adding a new feature (OAuth) and fixing an existing issue (login bug), which is considered higher complexity."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "refactor+add is ambiguous \u2192 BUILD",
+      "prompt": "Refactor the auth module AND add tests to it",
+      "expected": {
+        "path": "BUILD",
+        "skill": "brainstorming",
+        "model": "sonnet"
+      },
+      "actual": {
+        "path": "BUILD",
+        "skill": "brainstorming\u2192security",
+        "agent": "security-auditor",
+        "model": "opus",
+        "reasoning": "Refactoring and adding tests involve multiple steps, thus falling under the BUILD path."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": false,
+        "all_correct": false
+      }
+    },
+    {
+      "description": "simple question \u2192 SKIP",
+      "prompt": "What does this function do?",
+      "expected": {
+        "path": "SKIP",
+        "skill": "",
+        "model": ""
+      },
+      "actual": {
+        "path": "SKIP",
+        "skill": "",
+        "agent": "",
+        "model": "",
+        "reasoning": "This is a single factual question and can be answered without invoking a skill."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "factual question \u2192 SKIP",
+      "prompt": "What's the difference between map and flatMap?",
+      "expected": {
+        "path": "SKIP",
+        "skill": "",
+        "model": ""
+      },
+      "actual": {
+        "path": "SKIP",
+        "skill": "",
+        "agent": "",
+        "model": "haiku",
+        "reasoning": "This is a single factual question about programming concepts, which falls under the 'WHEN NO SKILL IS NEEDED' rule."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    },
+    {
+      "description": "single read \u2192 SKIP",
+      "prompt": "Show me line 42 of auth.ts",
+      "expected": {
+        "path": "SKIP",
+        "skill": "",
+        "model": ""
+      },
+      "actual": {
+        "path": "SKIP",
+        "skill": "",
+        "agent": "",
+        "model": "",
+        "reasoning": "This is a single-line fix to read a specific line from a file."
+      },
+      "score": {
+        "path_correct": true,
+        "skill_correct": true,
+        "model_correct": true,
+        "all_correct": true
+      }
+    }
+  ]
+}
