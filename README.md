@@ -1,8 +1,27 @@
 # skill-router
 
+[![GitHub stars](https://img.shields.io/github/stars/hussi9/skill-router?style=social)](https://github.com/hussi9/skill-router/stargazers) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![CI](https://github.com/hussi9/skill-router/workflows/lint/badge.svg)](https://github.com/hussi9/skill-router/actions)
+
 **Right Skill, right Agent, right Model, right Thinking depth — before any tool fires.**
 
-One SKILL.md (~200 lines). Auto-loaded by Claude Code. Zero UX. **90% routing accuracy** on 20 real prompts. Per-step model enforcement saves **30%+** on multi-domain chains.
+One SKILL.md (~220 lines). Auto-loaded by Claude Code. Zero UX. **90% routing accuracy** on 20 real prompts. Per-step model enforcement saves **30%+** on multi-domain chains.
+
+```
+$ # In Claude Code, with skill-router installed:
+$
+$ > lets add a settings page that writes to the db and emails the user
+
+  [skill-router] This touches 3 domains: UI/Frontend, DB schema, Edge function.
+  [skill-router] Chain: writing-plans → frontend-design + db-expert → vercel:deploy
+  [skill-router] Models: sonnet · sonnet+sonnet · sonnet  ·  Thinking: think
+  [skill-router] Dispatching step 1/3...
+
+  ▶ writing-plans  (sonnet, in-session)
+  ▶ frontend-design + db-expert  (sonnet, parallel via Agent)
+  ▶ vercel:deploy  (sonnet, in-session)
+```
+
+That announcement is testable — every step writes to `~/.claude/skill_router_log.jsonl`. Run `python3 scripts/audit-dispatch.py` after a week to score whether your router is actually following its own protocol.
 
 ![chain announcement](assets/proof/chain-multi-domain.png)
 
