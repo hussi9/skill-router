@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run all routing test cases through real Claude Code in one batched call
 
-PROMPT='You are running a routing accuracy test for skills-master. For each of the 20 tasks below, apply the skills-master 3-question routing rules and output ONLY a JSON array. No explanation, no markdown, no prose — just the raw JSON array starting with [ and ending with ].
+PROMPT='You are running a routing accuracy test for skill-router. For each of the 20 tasks below, apply the skill-router 3-question routing rules and output ONLY a JSON array. No explanation, no markdown, no prose — just the raw JSON array starting with [ and ending with ].
 
 Format: [{"id":1,"path":"BROKEN","skill":"systematic-debugging","agent":"general-purpose","model":"sonnet"},...]
 

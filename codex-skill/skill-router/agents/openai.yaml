@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Router"
+  short_description: "Route tasks to local Codex capabilities."
+  default_prompt: "Use $skill-router to recommend the best local execution lane and capability chain for this task."

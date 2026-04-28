@@ -1,9 +1,9 @@
 ---
-name: skills-master-personal
-description: Personal routing overrides. Layers on top of skills-master-core. Copy this file to ~/.claude/skills/skills-master/SKILL.personal.md and customize.
+name: skill-router-personal
+description: Personal routing overrides. Layers on top of skill-router-core. Copy this file to ~/.claude/skills/skill-router/SKILL.personal.md and customize.
 ---
 
-# Skills Master — Personal Overrides Template
+# Skill Router — Personal Overrides Template
 
 **How this works:**
 - The universal core (SKILL.md) runs first and handles 90% of tasks
@@ -14,10 +14,60 @@ description: Personal routing overrides. Layers on top of skills-master-core. Co
 
 ## HOW TO USE
 
-1. Copy to `~/.claude/skills/skills-master/SKILL.personal.md`
+1. Copy to `~/.claude/skills/skill-router/SKILL.personal.md`
 2. Replace the example sections below with your own projects
 3. Add rows to the routing tables for signals specific to your work
 4. The core SKILL.md loads first — only add things the core doesn't cover
+
+---
+
+## NAMED CHAINS — Save Your Preferred Sequences
+
+The router checks this block *before* computing a fresh chain from the routing
+table. If a `when:` signal matches your task, the saved chain wins.
+
+**Schema:**
+
+```yaml
+chains:
+  - name: ship-feature
+    when:
+      - "ship the feature"
+      - "lets implement"
+      - "start the implementation"
+    chain: writing-plans → dispatching-parallel-agents → frontend-design + db-expert
+
+  - name: production-incident
+    when:
+      - "500 errors in prod"
+      - "production is down"
+      - "users can't log in"
+    chain: superpowers:systematic-debugging → security
+    model: opus
+
+  - name: weekly-cleanup
+    when:
+      - "weekly cleanup"
+      - "tidy up the repo"
+    chain: refactor → docs → superpowers:requesting-code-review
+```
+
+**Operators:** `→` sequential (B depends on A), `+` parallel (no shared state).
+
+**Match rules:** any `when:` line is a substring match (case-insensitive)
+against the user's prompt. First match wins. If no match, the router falls
+through to the regular routing table.
+
+**When to add a chain:**
+- You've typed the same multi-step request 3+ times
+- You have a recurring workflow with a specific skill order that beats the default
+- A project has a non-obvious sequence (e.g. always run `db-expert` *before* `frontend-design` because schema drives types)
+
+**When NOT to add a chain:**
+- The default routing already nails it — adding a duplicate just adds maintenance
+- The chain only applies once — the table handles one-offs fine
+
+Full design + examples: see [`references/named-chains.md`](./references/named-chains.md).
 
 ---
 

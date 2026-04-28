@@ -1,9 +1,9 @@
 ---
-name: skills-master
+name: skill-router
 description: INVOKE BEFORE EVERY NON-TRIVIAL TASK — before writing code, before using any tool, before answering. Do not skip. Produces the required Skill + Agent + Model for the task. Routing engine for 2,700+ skills.
 ---
 
-# Skills Master — Universal Router
+# Skill Router — Universal Router
 
 **Output always:** `Skill + Agent + Model`
 
@@ -110,6 +110,44 @@ Before any "done" claim → `superpowers:verification-before-completion`
 Invoking step 1 now."
 ```
 
+Operators in the chain:
+- `→` sequential (B depends on A)
+- `+` parallel (steps don't share state)
+
+Full chain syntax + standard shapes: see [`references/multi-domain-chaining.md`](./references/multi-domain-chaining.md).
+
+---
+
+## NAMED CHAIN LOOKUP — Run Before Computing Fresh
+
+**After triage, BEFORE computing the chain from the routing tables**, check
+`SKILL.personal.md` for a `chains:` block. If the user has saved a named chain
+that matches the current task signature, use it.
+
+```
+Step 1 — Read SKILL.personal.md (already loaded as override layer)
+Step 2 — Look for a `chains:` block. Each entry has:
+           name:    short label
+           when:    keyword/phrase signals that should activate this chain
+           chain:   the dispatch sequence using → and + operators
+Step 3 — If any `when:` signal matches the current task → use that chain.
+Step 4 — Otherwise → compute fresh from the routing tables below.
+```
+
+**Always announce when a named chain wins.** The transparency rule does not
+change just because the chain came from storage:
+
+```
+Using your saved chain `ship-feature`:
+  writing-plans → dispatching-parallel-agents → frontend-design + db-expert
+```
+
+The chain in storage IS the chain that fires — no special syntax, no
+re-interpretation. If a saved chain is wrong, the user edits one file. No
+slash command, no tooling.
+
+Full design rationale + schema: see [`references/named-chains.md`](./references/named-chains.md).
+
 ---
 
 ## CATALOG CHECK — Always Run After Triage (Key Differentiator)
@@ -143,6 +181,8 @@ Step 3 — GENERATE (last resort):
 - Single-line fix or trivial command
 - The keyword is too generic to produce useful results (e.g., "code", "file", "text")
 
+Curated repo list + full validation gates: see [`references/catalog-check.md`](./references/catalog-check.md) and [`references/known-skill-repos.md`](./references/known-skill-repos.md).
+
 ---
 
 ## PERSONAL OVERRIDES
@@ -150,8 +190,8 @@ Step 3 — GENERATE (last resort):
 Add project-specific routing on top of this file:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/SKILL.personal.md \
-  > ~/.claude/skills/skills-master/SKILL.personal.md
+curl -sL https://raw.githubusercontent.com/hussi9/skill-router/main/SKILL.personal.md \
+  > ~/.claude/skills/skill-router/SKILL.personal.md
 ```
 
 Edit `SKILL.personal.md` with your project signals. Your rules win over the core (CSS cascade model).

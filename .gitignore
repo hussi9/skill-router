@@ -5,6 +5,8 @@ invocation_test_results.json
 
 # Internal working files
 .archive/
+marketing/
+.omx/
 
 # macOS
 .DS_Store

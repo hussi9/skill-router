@@ -1,14 +1,43 @@
-# skills-master
+# skill-router
 
-![skills-master routing diagram](assets/skills-master-visual.png)
+![skill-router routing diagram](assets/skill-router-visual.png)
 
-**Consistent skill routing for Claude Code. One file. Zero configuration.**
+**Agent routing and orchestration for individual builders and power users.**
+
+> Today the repo is Claude Code-first. The core product direction is broader:
+> help an individual operator choose the right capability, lane, and workflow
+> faster. It is not an enterprise governance product.
 
 > If this saves you time, a ⭐ on GitHub helps others find it.
 
 Claude Code has access to hundreds of skills — but it picks the wrong one 20-30% of the time. It rationalizes skipping skills entirely. It burns `opus` tokens on tasks that need `haiku`. It fires `brainstorming` when you just need `systematic-debugging`.
 
-`skills-master` fixes this with a 3-question routing engine that runs before every non-trivial task and always outputs the right **Skill + Agent + Model**.
+`skill-router` fixes this with a 3-question routing engine that runs before every non-trivial task and always outputs the right **Skill + Agent + Model**.
+
+---
+
+## Positioning
+
+- **Best for:** individual developers, solo builders, power users, heavy skill users
+- **Core promise:** route to the right capability faster and reduce workflow thrash
+- **Not for:** org governance, policy enforcement, audit, or enterprise safety controls
+- **Separate from Sentigent:** Sentigent governs and proves agent judgment for teams and enterprises; `skill-router` optimizes execution flow for individual operators
+
+## Two flavors — Claude Code + Codex
+
+`skill-router` ships in two adapted forms. Same routing engine, same dispatch
+triple, different host harnesses.
+
+| Flavor | Where it lives | Loaded as | Status |
+|--------|----------------|-----------|--------|
+| **Claude Code** | [`SKILL.md`](./SKILL.md) | Auto-loaded skill at `~/.claude/skills/skill-router/SKILL.md` | Production |
+| **Codex** | [`codex-skill/skill-router/`](./codex-skill/skill-router/) | Manual invocation via `AGENTS.md` template | Working draft |
+
+Codex groundwork:
+- [`CODEX_ADAPTATION_PLAN.md`](./CODEX_ADAPTATION_PLAN.md) — what changes between harnesses
+- [`IMPLEMENTATION_PLAN.md`](./IMPLEMENTATION_PLAN.md), [`PRODUCT_POSITIONING.md`](./PRODUCT_POSITIONING.md), [`ROUTING_CONTRACT.md`](./ROUTING_CONTRACT.md) — design
+- [`templates/AGENTS.codex.template.md`](./templates/AGENTS.codex.template.md) — drop-in template for Codex repos
+- `python3 scripts/scan_codex_inventory.py` — inventory tool
 
 ---
 
@@ -16,10 +45,10 @@ Claude Code has access to hundreds of skills — but it picks the wrong one 20-3
 
 **You type:** *"The login endpoint is returning 500 errors in production"*
 
-**Without skills-master:**
+**Without skill-router:**
 Claude launches `brainstorming`, spends time ideating on architecture, eventually reads the error. Uses `opus` the whole time.
 
-**With skills-master:**
+**With skill-router:**
 Q1 fires: something is broken → `systematic-debugging` + `sonnet`. Reads the error, traces the stack, applies the fix. Right skill, right model, first time.
 
 ## Measured Results
@@ -39,6 +68,31 @@ The 2 routing misses share one root cause: auth-adjacent task wording incorrectl
 > The top four rows come from `run_routing_test.sh` (20 prompts through `claude -p`). The invocation row (7/8) is from a separate live-session test verifying the `Skill` tool actually fires, not just that the routing triple is correct.
 
 Test harness is in the repo — run `bash run_routing_test.sh` against your own setup.
+
+---
+
+## Proof in the Wild — Multi-Domain Chaining
+
+Two unedited screenshots from real Claude Code sessions showing the router announcing a chain *before* touching code.
+
+**Multi-domain BUILD → 4-skill chain:**
+
+> "lets start teh implementation"
+> → *This touches 3 domains: UI/Frontend, DB schema, and a new Edge function.
+>   Chain: `writing-plans` → `superpowers:dispatching-parallel-agents` → `frontend-design` + `db-expert`.*
+
+![Multi-domain chain](assets/proof/chain-multi-domain.png)
+
+**Single-domain OPERATE → no chain, just the right skill:**
+
+> "please revewi the entier system again ... code reveiw"
+> → *This is an OPERATE task → `superpowers:requesting-code-review` → `superpowers:code-reviewer` agent.*
+
+![Code review chain](assets/proof/chain-code-review.png)
+
+Same router, same install. The first announces a 4-step chain across UI + DB + Edge. The second picks one skill and one agent and gets to work. That's the routing table in `SKILL.md` doing exactly what it says.
+
+Full breakdown: [`assets/proof/README.md`](assets/proof/README.md).
 
 ---
 
@@ -76,9 +130,9 @@ Model selection is part of routing — not a separate decision. Simple file read
 ### 1. Install the skill (required)
 
 ```bash
-mkdir -p ~/.claude/skills/skills-master
-curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/SKILL.md \
-  > ~/.claude/skills/skills-master/SKILL.md
+mkdir -p ~/.claude/skills/skill-router
+curl -sL https://raw.githubusercontent.com/hussi9/skill-router/main/SKILL.md \
+  > ~/.claude/skills/skill-router/SKILL.md
 ```
 
 Claude Code loads it automatically. You never invoke it manually — it runs before every non-trivial task.
@@ -86,8 +140,8 @@ Claude Code loads it automatically. You never invoke it manually — it runs bef
 ### 2. Add personal overrides (optional)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/SKILL.personal.md \
-  > ~/.claude/skills/skills-master/SKILL.personal.md
+curl -sL https://raw.githubusercontent.com/hussi9/skill-router/main/SKILL.personal.md \
+  > ~/.claude/skills/skill-router/SKILL.personal.md
 ```
 
 Edit it to add project-specific routing. The core runs first, your overrides layer on top (CSS cascade model).
@@ -103,7 +157,7 @@ See which skill is active directly in your Claude Code status line:
 **Install the statusline:**
 
 ```bash
-curl -sL https://raw.githubusercontent.com/hussi9/skills-master/main/statusline.sh \
+curl -sL https://raw.githubusercontent.com/hussi9/skill-router/main/statusline.sh \
   > ~/.claude/statusline.sh
 chmod +x ~/.claude/statusline.sh
 ```
@@ -160,8 +214,8 @@ cat ~/.claude/skill_usage.log
 # Most used skills
 sort ~/.claude/skill_usage.log | uniq -c -f1 | sort -rn
 
-# skills-master invocations only
-grep skills-master ~/.claude/skill_usage.log | wc -l
+# skill-router invocations only
+grep skill-router ~/.claude/skill_usage.log | wc -l
 ```
 
 ---
@@ -191,7 +245,7 @@ Full routing table is in [SKILL.md](./SKILL.md).
 
 ## Skill Discovery — The Key Differentiator
 
-New skills are published to GitHub daily. skills-master keeps you current without manual tracking.
+New skills are published to GitHub daily. skill-router keeps you current without manual tracking.
 
 **How it works — on every non-trivial task:**
 
@@ -210,7 +264,7 @@ New skills are published to GitHub daily. skills-master keeps you current withou
 **Example:** You ask "help me optimize my Kubernetes pod scheduling."
 - Table routes to `system-design` (generic)
 - Catalog check finds `kubernetes-expert` in Antigravity
-- skills-master uses `kubernetes-expert` instead
+- skill-router uses `kubernetes-expert` instead
 - You get specialist-level guidance without knowing the skill existed
 
 The catalog check is the reason people install this once and keep it — new skills become available without any manual tracking.
@@ -237,11 +291,42 @@ See [SKILL.personal.md](./SKILL.personal.md) for the template.
 
 ## Design Principles
 
-- **Zero UX** — you never invoke skills-master. You type normally, Claude routes correctly.
+- **Zero UX** — you never invoke skill-router. You type normally, Claude routes correctly.
 - **Deterministic** — same input always produces same output. No vibes-based routing.
 - **Fail safe** — ambiguous tasks default to the higher-complexity path. Over-routing beats under-routing.
 - **Living** — checks local + GitHub catalogs on every task. Install a new skill, it routes to it immediately.
 - **One file** — no build step, no config, no dependencies. Drop it in and forget it.
+
+---
+
+## Documentation
+
+**Start here**
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | End-to-end design + value — read this to understand *why* skill-router is shaped the way it is |
+| [`SKILL.md`](./SKILL.md) | The router itself — Claude Code auto-loads this |
+| [`SKILL.personal.md`](./SKILL.personal.md) | Per-user overrides + named chains template |
+| [`assets/proof/README.md`](./assets/proof/README.md) | Proof-in-the-wild — verbatim chain announcements from real sessions |
+
+**References (the router consults these at runtime)**
+
+| Doc | Purpose |
+|-----|---------|
+| [`references/known-skill-repos.md`](./references/known-skill-repos.md) | Curated list of skill sources (local + remote) |
+| [`references/catalog-check.md`](./references/catalog-check.md) | The catalog-check protocol with validation gates |
+| [`references/multi-domain-chaining.md`](./references/multi-domain-chaining.md) | Chain syntax (`→` sequential, `+` parallel) and standard shapes |
+| [`references/named-chains.md`](./references/named-chains.md) | Saved-sequence feature — schema, matching, design rationale |
+
+**Tooling**
+
+| Doc | Purpose |
+|-----|---------|
+| [`run_routing_test.sh`](./run_routing_test.sh) | Test harness — runs 20 prompts through `claude -p` |
+| [`statusline.sh`](./statusline.sh) | Status bar showing active skill + cost + context |
+| [`settings-hooks.json`](./settings-hooks.json) | Hook snippet for logging skill usage |
+| [`codex-skill/skill-router/`](./codex-skill/skill-router/) | Codex flavor of the router |
 
 ---
 

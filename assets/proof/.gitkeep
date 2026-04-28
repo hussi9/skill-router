@@ -1,0 +1,6 @@
+# Drop the two screenshot PNGs into this folder before pushing:
+#
+#   chain-multi-domain.png   (the BUILD/4-skill chain announcement)
+#   chain-code-review.png    (the OPERATE/single-skill announcement)
+#
+# Both are referenced by README.md and assets/proof/README.md.
