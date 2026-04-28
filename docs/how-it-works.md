@@ -1,4 +1,8 @@
+[← back to skill-router](../README.md) · [Customizing →](./customizing.md) · [Proof →](./proof.md)
+
 # How It Works
+
+> **TL;DR:** Triage → check for saved chain → look up routing-table row → upgrade via catalog check → announce → dispatch with per-step model + thinking depth. ~5 seconds of routing thought before any tool fires.
 
 Every non-trivial task runs through 4 steps before any tool fires.
 

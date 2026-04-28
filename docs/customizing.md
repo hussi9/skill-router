@@ -1,3 +1,5 @@
+[← back to skill-router](../README.md) · [How it works →](./how-it-works.md) · [Proof →](./proof.md)
+
 # Customizing
 
 Two layers, both in `SKILL.personal.md`. CSS-cascade model: your rules win over the universal core.

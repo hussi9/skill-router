@@ -1,3 +1,5 @@
+[← back to skill-router](../README.md)
+
 # Documentation
 
 Read in order. Each doc has one job.

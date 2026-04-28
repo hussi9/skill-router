@@ -1,3 +1,5 @@
+[← back to skill-router](../README.md) · [How it works →](./how-it-works.md) · [Customizing →](./customizing.md)
+
 # Proof
 
 Two unedited screenshots from real Claude Code sessions, captured 2026-04-27.

@@ -5,6 +5,14 @@ All notable changes to skill-router. Newest first.
 ## Unreleased
 
 ### Added
+- **README user-friendliness pass:**
+  - Stronger one-line benefit at the top (vs feature-first opening)
+  - Statusline preview in README so people see the visible value before installing
+  - Common Questions section answering 7 first-timer questions (load failures, disable, claude.ai support, custom skills, logging)
+  - Project section linking CHANGELOG + CONTRIBUTING + LICENSE
+  - Inlined `intellectronica/agent-skills` into the "Works with" table
+- **Doc breadcrumbs** — every `docs/*.md` now has a top-line back-to-README link plus sibling navigation
+- **`docs/how-it-works.md` TL;DR** — one-sentence summary of the 4-step pipeline at the top
 - **CONTRIBUTING.md** with file-map, what-we-want / what-we-don't-want, PR checklist
 - **GitHub Actions lint workflow** (`.github/workflows/lint.yml`) — validates SKILL.md frontmatter, statusline runs cleanly, no planning docs at root, known-skill-repos has canonical entries, CHANGELOG has Unreleased section, Claude + Codex flavors have parity on core sections
 - **Codex flavor lane table** now includes default Reasoning + Thinking columns matching Claude flavor
