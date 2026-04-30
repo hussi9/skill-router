@@ -120,6 +120,14 @@ SKIP_RE = _re(
     r"^\s*Hook (blocking|denied) error",
     r"\bhookSpecificOutput\b",
     r"\bIRON RULE\b",  # any prompt that's quoting the IRON RULE wording
+    # Session-continuation summaries auto-injected when context overflows.
+    # These often quote prior errors / crashes / refactors and must not fire.
+    # (Real-prompt sampler caught this as a false-positive on systematic-
+    # debugging — 40% of non-SKIP traffic was session recaps.)
+    r"^\s*This session is being continued from a previous conversation",
+    r"^\s*<task-notification>",
+    r"^\s*<task-id>",
+    r"^\s*The user (sent|ran|just)",  # harness-injected user-action narration
 )
 
 # ---- Domain detection -------------------------------------------------------
