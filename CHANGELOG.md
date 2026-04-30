@@ -4,6 +4,12 @@ All notable changes to skill-router. Newest first.
 
 ## Unreleased
 
+### Added
+- **Self-improvement loop** — `scripts/weekly-analysis.sh` orchestrates all three analysis scripts in one command (`learn-from-history.py` → `audit-dispatch.py` → `learn-chains.py`). Run manually or automate via the included launchd/crontab template. Appends a timestamped digest to `~/.claude/skill_router_weekly.log`.
+- **`setup/launchd-weekly.plist`** — macOS launchd template. Substitute `{{SKILL_ROUTER_PATH}}` and `{{HOME}}` with one `sed` command, copy to `~/Library/LaunchAgents/`, load with `launchctl`. Fires every Monday at 9am. Equivalent Linux crontab line documented in `docs/self-improvement.md`.
+- **`docs/self-improvement.md`** — complete guide to the feedback loop: what each script measures, what to do when numbers are bad, how named chain auto-promotion works, full macOS + Linux setup instructions, and a 7-question FAQ covering "no log entries", "chain not firing", log file locations, and safe run frequency.
+- **`learn-chains.py --apply` clarified** — the `--apply` flag appends proposals with placeholder `when:` keywords to `SKILL.personal.md`. The doc now explicitly states you must edit the `when:` values before they fire — the script fills in steps and models automatically but can't know your phrasing.
+
 ### Fixed
 - **Ghost-skill deadlock** — routing table entries that referenced non-existent skills (`system-design`, `typescript-expert`, `mobile-developer`, etc.) caused a permanent iron-rule deadlock: the hook blocked all edits until the skill ran, but `Skill()` failed because the skill doesn't exist. Fixed by replacing every ghost entry with the nearest installed skill, and adding belt-and-suspenders: the `PreToolUse` hook now auto-clears state if `remaining[0]` resolves to a ghost, so no deadlock survives even if one slips through.
 - **Parallel-chain `Stop` hook deadlock** — multi-domain BUILD chains wrote all steps (including parallel agent-dispatched ones) to `remaining`. Since agent-dispatched steps never call `Skill()` in the parent session, the `Stop` hook blocked turn end forever. Fixed: `remaining` now only tracks in-session Skill() calls; parallel fan-out steps are in `all` but not `remaining`.

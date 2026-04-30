@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd-weekly.plist — runs weekly-analysis.sh every Monday at 9am.
+
+  SETUP (one-time, ~60 seconds):
+
+    1. Substitute your real paths:
+         REPO=/path/to/skill-router          # wherever you cloned the repo
+         sed -i '' \
+           "s|{{SKILL_ROUTER_PATH}}|$REPO|g; s|{{HOME}}|$HOME|g" \
+           setup/launchd-weekly.plist
+
+    2. Copy to LaunchAgents:
+         cp setup/launchd-weekly.plist \
+           ~/Library/LaunchAgents/com.skill-router.weekly-analysis.plist
+
+    3. Load it:
+         launchctl load \
+           ~/Library/LaunchAgents/com.skill-router.weekly-analysis.plist
+
+    4. Verify it loaded:
+         launchctl list | grep skill-router
+
+  To run immediately (without waiting for Monday):
+    launchctl start com.skill-router.weekly-analysis
+
+  To unload:
+    launchctl unload \
+      ~/Library/LaunchAgents/com.skill-router.weekly-analysis.plist
+
+  Output goes to: {{HOME}}/.claude/skill_router_weekly.log
+-->
+<plist version="1.0">
+<dict>
+
+    <key>Label</key>
+    <string>com.skill-router.weekly-analysis</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>{{SKILL_ROUTER_PATH}}/scripts/weekly-analysis.sh</string>
+    </array>
+
+    <!-- Monday (Weekday=2 on macOS) at 09:00 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>2</integer>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>{{HOME}}/.claude/skill_router_weekly.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{HOME}}/.claude/skill_router_weekly_err.log</string>
+
+    <!-- Do NOT run immediately on load — wait for scheduled time -->
+    <key>RunAtLoad</key>
+    <false/>
+
+</dict>
+</plist>

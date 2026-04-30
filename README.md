@@ -4,44 +4,91 @@
 
 **Right Skill, right Agent, right Model, right Thinking depth — before any tool fires.**
 
-One SKILL.md (~265 lines). Auto-loaded by Claude Code. Zero UX. **80% composite routing accuracy / 90% path-only** on 20 real prompts (3-run average). Per-step model enforcement saves **30%+** on multi-domain chains. Every announcement line is `[skill-router]`-prefixed so `grep` can audit your transcript.
+One SKILL.md (~300 lines). Auto-loaded by Claude Code. Zero UX. **80% composite routing accuracy / 90% path-only** on 20 real prompts (3-run average). Every announcement line is `[skill-router]`-prefixed so `grep` can audit your transcript.
 
 ```
-$ # In Claude Code, with skill-router installed:
-$
-$ > lets add a settings page that writes to the db and emails the user
+$ > add a settings page that writes to the db and emails the user
 
-  [skill-router] This touches 3 domains: UI/Frontend, DB schema, Edge function.
-  [skill-router] Chain: writing-plans → frontend-design + db-expert → vercel:deploy
-  [skill-router] Models: sonnet · sonnet+sonnet · sonnet  ·  Thinking: think
-  [skill-router] Dispatching step 1/3...
+[skill-router] This touches 3 domains: UI/Frontend, DB schema, Edge function.
+[skill-router] Chain: superpowers:writing-plans → frontend-design:frontend-design + db-expert
+[skill-router] Models: sonnet · sonnet+sonnet  ·  Thinking: think
+[skill-router] Invoke step 1/2 now:
 
-  ▶ writing-plans  (sonnet, in-session)
-  ▶ frontend-design + db-expert  (sonnet, parallel via Agent)
-  ▶ vercel:deploy  (sonnet, in-session)
+▶ superpowers:writing-plans  (sonnet, in-session)
+▶ frontend-design:frontend-design + db-expert  (sonnet, parallel via Agent)
 ```
 
-That announcement is testable — every step writes to `~/.claude/skill_router_log.jsonl`. Run `python3 scripts/audit-dispatch.py` after a week to score whether your router is actually following its own protocol.
+The router announces what it will do *before* any tool fires. `[skill-router]` on every line is the testable contract — `grep '\[skill-router\]'` your transcript and verify what fired matches what was announced.
+
+Every step also writes to `~/.claude/skill_router_log.jsonl`. Run `python3 scripts/audit-dispatch.py` after a week to score whether the router is actually following its own protocol.
 
 ![chain announcement](assets/proof/chain-multi-domain.png)
 
-```
-You type:    lets start teh implementation
-Router says: [skill-router] This touches 3 domains: UI/Frontend, DB, Edge function.
-             [skill-router] Chain: writing-plans → frontend-design + db-expert → vercel:deploy
-             [skill-router] Models: sonnet · sonnet+sonnet · sonnet  ·  Thinking: think
-             [skill-router] Dispatching step 1/3...
-
-             ▶ writing-plans  (sonnet, in-session)
-             ▶ frontend-design + db-expert  (sonnet, parallel via Agent)
-             ▶ vercel:deploy  (sonnet, in-session)
-```
-
-The router announces what it's going to do *before* any code is touched. The `[skill-router]` prefix is the testable contract — you can `grep '\[skill-router\]'` your transcript later and verify what fired matches what was announced.
-
 ## Why you'll want this
 
-Claude Code can use hundreds of skills. It picks the wrong one ~20% of the time, skips skills it decides are "too simple," and burns `opus` tokens on tasks that need `haiku`. `skill-router` replaces that implicit choice with a deterministic 3-question triage that runs before every non-trivial task.
+Claude Code has a skills ecosystem with 2,700+ skills. There's no built-in routing layer.
+
+Claude guesses which skill to use — or ignores them entirely. On a 20-prompt test harness, it picks the wrong skill ~20% of the time, skips skills it decides are "too simple," and makes no attempt to match model cost to task complexity. `skill-router` replaces that implicit guessing with a deterministic 3-question triage that runs before every non-trivial task.
+
+Three things make the wrong-skill problem worse as you install more skills:
+
+**No routing.** Claude has no deterministic layer that decides: what is this task? what skill fits? what model is right? Without a routing layer, more skills = more ambiguity.
+
+**No catalog maintenance.** Your installed skills drift. Ghost entries pile up. The router validates skill existence before blocking on iron-rule enforcement — deadlocks are caught automatically.
+
+**No chaining.** Multi-domain work needs skills to fan out. "Add Stripe checkout that saves to DB and emails the user" is 4 domains — the router builds and dispatches the chain.
+
+## What it actually outputs
+
+Multi-domain BUILD — skills fan out in parallel:
+
+```
+> add stripe checkout — saves order to db, emails confirmation
+
+[skill-router] This touches 4 domains: 3rd-party, DB schema, Edge function, UI/Frontend.
+[skill-router] Chain: superpowers:writing-plans → connect-apps + db-expert + frontend-design:frontend-design
+[skill-router] Models: sonnet · sonnet+sonnet+sonnet  ·  Thinking: think
+[skill-router] Invoke step 1/2 now:
+
+▶ superpowers:writing-plans  (sonnet, in-session)
+▶ connect-apps + db-expert + frontend-design:frontend-design  (sonnet, parallel via Agent)
+```
+
+Research → plan → steering meeting — the idea-to-feature pipeline:
+
+```
+> want to add AI spending coach — weekly check-ins, pattern detection,
+> personalized nudges. is this worth building? if yes, plan it out.
+
+[skill-router] This touches 3 domains: Research/Strategy, Product planning, Architecture.
+[skill-router] Chain: superpowers:brainstorming → superpowers:writing-plans → product-manager + tech-lead
+[skill-router] Models: sonnet · sonnet · opus+opus  ·  Thinking: ultrathink
+[skill-router] Invoke step 1/3 now:
+
+▶ superpowers:brainstorming    (sonnet, in-session)
+▶ superpowers:writing-plans    (sonnet, in-session)
+▶ product-manager + tech-lead  (opus, parallel via Agent)
+```
+
+Step 1 researches the idea — prior art, risks, what similar products got wrong.
+Step 2 converts that into a structured plan with tasks and open questions.
+Step 3 runs a steering meeting: product-manager and tech-lead both read the plan simultaneously on opus — heaviest thinking, before a line of code is touched.
+
+Single-domain OPERATE — safety gate before deploy:
+
+```
+> deploy to production
+
+[skill-router] This is a OPERATE task — 2-step chain.
+[skill-router] Chain: superpowers:verification-before-completion → vercel:deploy
+[skill-router] Models: sonnet · sonnet
+[skill-router] Invoke step 1/2 now:
+
+▶ superpowers:verification-before-completion  (sonnet, in-session)
+▶ vercel:deploy  (sonnet, in-session)
+```
+
+The verification gate runs every time before deploy fires — without you remembering to ask.
 
 ## Install — one curl, 10 seconds
 
@@ -63,15 +110,13 @@ You should see Claude announce a chain *before* reading any files:
 
 ```
 [skill-router] This touches 2 domains: UI/Frontend, DB schema.
-[skill-router] Chain: writing-plans → frontend-design + db-expert
+[skill-router] Chain: superpowers:writing-plans → frontend-design:frontend-design + db-expert
 [skill-router] Models: sonnet · sonnet+sonnet  ·  Thinking: think
-[skill-router] Dispatching step 1/2...
+[skill-router] Invoke step 1/2 now:
 
-▶ writing-plans  (sonnet, in-session)
-▶ frontend-design + db-expert  (sonnet, parallel via Agent)
+▶ superpowers:writing-plans  (sonnet, in-session)
+▶ frontend-design:frontend-design + db-expert  (sonnet, parallel via Agent)
 ```
-
-The `[skill-router]` prefix on every announcement line is the testable contract — `grep '\[skill-router\]'` your transcript and verify what fired matches what was announced.
 
 If Claude jumps straight into reading files with no `[skill-router]` lines, the skill didn't load — verify `~/.claude/skills/skill-router/SKILL.md` exists and starts with `name: skill-router`.
 
@@ -102,11 +147,10 @@ Add the statusline + hook (5 minutes — see [docs/customizing.md](./docs/custom
 | Path + Skill + Model all correct | 16/20 (**80%**) |
 | Model selection only | 19–20/20 (**95–100%**) |
 
-Stable misroutes (same 2–3 cases fail every run):
-- "Deploy" → picks `vercel:deploy` directly, skipping the `verification-before-completion` gate
+Known stable misroute (same case fails every run):
 - Ambiguous "fix X AND add Y" → routes to OPERATE instead of defaulting to BUILD per the ambiguity rule
 
-These are systematic gaps in how Claude follows the routing table — not random variance. They're the next thing to fix in `SKILL.md`.
+This is a systematic gap in how Claude follows the routing table — not random variance.
 
 ## Common questions
 
@@ -131,12 +175,43 @@ Copy `SKILL.personal.md` to `~/.claude/skills/skill-router/SKILL.personal.md` an
 **Where does it log activity?**
 `~/.claude/skill_usage.log` (every Skill fire) and `~/.claude/skill_router_log.jsonl` (chain announcements + thinking events). Useful for debugging and for the statusline.
 
+**Does it get smarter over time?**
+Yes — run `bash scripts/weekly-analysis.sh` (or automate it via launchd/crontab) to surface routing gaps and promote repeated chains to named chains. Named chains bypass LLM triage entirely — faster and 100% consistent. See [docs/self-improvement.md](./docs/self-improvement.md).
+
+## Self-improvement — the router learns your patterns
+
+Three analysis scripts ship with the repo. Run them weekly and the router improves automatically:
+
+| Script | What it measures | What to do with it |
+|---|---|---|
+| `scripts/learn-from-history.py` | Announced skills vs actually invoked | Tighten patterns with false positives; broaden patterns for missed triggers |
+| `scripts/audit-dispatch.py` | Chain steps announced vs logged | Fix dispatch protocol gaps |
+| `scripts/learn-chains.py --apply` | Chains you've run 3+ times | Promotes them to named chains — no LLM triage, zero variance |
+
+Run all three at once:
+```bash
+bash scripts/weekly-analysis.sh           # report only
+bash scripts/weekly-analysis.sh --apply   # also promote repeated chains
+```
+
+Automate it (macOS launchd — runs every Monday at 9am):
+```bash
+REPO="$HOME/path/to/skill-router"
+sed -e "s|{{SKILL_ROUTER_PATH}}|$REPO|g" -e "s|{{HOME}}|$HOME|g" \
+    "$REPO/setup/launchd-weekly.plist" \
+    > ~/Library/LaunchAgents/com.skill-router.weekly-analysis.plist
+launchctl load ~/Library/LaunchAgents/com.skill-router.weekly-analysis.plist
+```
+
+Full details, Linux crontab instructions, and what to do when each metric is bad: [docs/self-improvement.md](./docs/self-improvement.md).
+
 ## Documentation
 
 | Doc | What you'll learn | Length |
 |---|---|---|
 | [docs/how-it-works.md](./docs/how-it-works.md) | The 4-step routing pipeline | ~5 min |
 | [docs/customizing.md](./docs/customizing.md) | Personal overrides + named chains | ~3 min |
+| [docs/self-improvement.md](./docs/self-improvement.md) | Weekly analysis, named chain promotion, cron setup | ~5 min |
 | [docs/proof.md](./docs/proof.md) | Real-session screenshots | ~2 min |
 
 Reference (router consults these at runtime): [`references/`](./references/).
