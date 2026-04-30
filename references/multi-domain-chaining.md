@@ -49,20 +49,55 @@ If `SKILL.personal.md` declares a `chains:` block and any `when:` keyword matche
 
 ## Announcement format
 
+The exact format is mandated by `SKILL.md` → "ANNOUNCEMENT FORMAT" section.
+Output verbatim, substitute only `<vars>`. The `[skill-router]` prefix on
+every line is the testable contract — users grep their transcript for it.
+
 Single-domain:
 ```
-This is a [BROKEN | BUILD | OPERATE] task → <skill> → <agent>.
+[skill-router] This is a <BROKEN|BUILD|OPERATE> task → <skill> → <agent>.
+[skill-router] Model: <model>  ·  Thinking: <thinking>
+[skill-router] Invoke now:
+
+▶ <skill>  (<model>, <in-session | via Agent>)
 ```
 
 Multi-domain (computed):
 ```
-This touches [N] domains: <d1>, <d2>. Chain: <step1> → <step2> + <step3>.
+[skill-router] This touches <N> domains: <d1>, <d2>, <d3>.
+[skill-router] Chain: <s1> → <s2> + <s3>
+[skill-router] Models: <m1> · <m2>+<m3>  ·  Thinking: <max-thinking>
+[skill-router] Invoke step 1/<N> now:
+
+▶ <s1>  (<m1>, <in-session | via Agent>)
+▶ <s2> + <s3>  (<m2>, parallel via Agent)
 ```
 
 Multi-domain (saved):
 ```
-Using your saved chain `<name>`: <step1> → <step2> + <step3>.
+[skill-router] Using your saved chain `<name>`: <s1> → <s2> + <s3>
+[skill-router] Models: <m1> · <m2>+<m3>  ·  Thinking: <max-thinking>
+[skill-router] Invoke step 1/<N> now:
+
+▶ <s1>  (<m1>, <in-session | via Agent>)
+▶ <s2> + <s3>  (<m2>, parallel via Agent)
 ```
+
+Per-step completion:
+```
+[skill-router] Step <n>/<N> done.
+[skill-router] Invoke step <n+1>/<N> now:
+```
+
+Chain completion:
+```
+[skill-router] Chain done.
+```
+
+Rules:
+- `Models:` separator: `·` between sequential steps, `+` inside one parallel step.
+- `Thinking:` is the highest depth across all steps (`none | think | think-hard | ultrathink`). Omit the field entirely when every step is `none`.
+- Each `▶` line ends with `in-session`, `via Agent`, or `parallel via Agent` — matching the dispatch decision (see [`dispatch-protocol.md`](./dispatch-protocol.md)).
 
 ## Failure modes the router avoids
 

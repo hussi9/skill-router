@@ -1,22 +1,66 @@
 {
-  "_comment": "skill-router hooks. Two log files are involved:",
-  "_log_skill_usage": "~/.claude/skill_usage.log — written by the hook below, one line per Skill tool fire (timestamp\\tskill-name)",
-  "_log_skill_router": "~/.claude/skill_router_log.jsonl — chain-start, chain-step, thinking-active, catalog-upgrade events. Written by SKILL.md's DISPATCH PROTOCOL section, NOT by this hook.",
+  "_comment": "skill-router hooks. Three log files / state files are involved:",
+  "_log_skill_usage": "~/.claude/skill_usage.log — written by the Skill PostToolUse hook, one line per Skill tool fire (timestamp\\tskill-name). Used by the adaptive learning loop in scripts/learn-from-history.py.",
+  "_log_skill_router": "~/.claude/skill_router_log.jsonl — chain-start, chain-step, thinking-active, catalog-upgrade events. Written by scripts/router.py.",
+  "_state_pending": "~/.claude/skill_router_pending.json — IRON RULE pending state. Written by scripts/router.py when an announcement fires; cleared at the start of every UserPromptSubmit turn; updated by the Skill PostToolUse hook to remove invoked skills from .remaining. Read by the PreToolUse and Stop hooks.",
   "hooks": {
-    "PostToolUse": [
+    "UserPromptSubmit": [
       {
-        "matcher": "Skill",
+        "_purpose": "Run the deterministic router and inject the announcement as systemMessage / additionalContext. The router itself clears pending state at turn start and writes new pending state when an announcement fires.",
         "hooks": [
           {
             "type": "command",
-            "command": "skill=$(echo \"$CLAUDE_TOOL_INPUT\" | jq -r '.skill // empty'); if [[ -n \"$skill\" ]]; then printf '%s\\t%s\\n' \"$(date '+%Y-%m-%d %H:%M:%S')\" \"$skill\" >> ~/.claude/skill_usage.log; fi",
-            "async": true
+            "command": "prompt=$(jq -r '.prompt // empty'); [ -z \"$prompt\" ] && exit 0; out=$(echo \"$prompt\" | python3 ~/.claude/skills/skill-router/scripts/router.py 2>/dev/null); [ -z \"$out\" ] && exit 0; jq -n --arg msg \"$out\" '{systemMessage: $msg, hookSpecificOutput: {hookEventName: \"UserPromptSubmit\", additionalContext: $msg}}'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "_purpose": "IRON RULE — block state-changing tools (Bash, Edit, Write, Task, NotebookEdit, MultiEdit) when an announced skill has not yet been invoked. Read/Glob/Grep/TodoWrite/Skill remain allowed so the model can still gather context and dispatch.",
+        "matcher": "Bash|Edit|Write|Task|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; expected=$(jq -r '.remaining[0]' \"$state\"); jq -n --arg s \"$expected\" '{hookSpecificOutput: {hookEventName: \"PreToolUse\", permissionDecision: \"deny\", permissionDecisionReason: (\"[skill-router] IRON RULE: your next tool call must be Skill(skill=\\\"\" + $s + \"\\\"). Other state-changing tools are blocked until that skill runs. Read/Glob/Grep/TodoWrite remain allowed. Override: include [no-router] in your next prompt.\")}}'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "_purpose": "Log every Skill invocation (used by adaptive learning) AND remove the invoked skill from the IRON RULE pending state.",
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "_note": "Modern Claude Code passes hook input via stdin as JSON. Older versions used $CLAUDE_TOOL_INPUT env var. Read stdin for forward compatibility.",
+            "type": "command",
+            "command": "skill=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); if [ -n \"$skill\" ]; then printf '%s\\t%s\\n' \"$(date '+%Y-%m-%d %H:%M:%S')\" \"$skill\" >> ~/.claude/skill_usage.log; fi",
+            "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; invoked=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); [ -z \"$invoked\" ] && exit 0; tmp=$(mktemp); if jq --arg s \"$invoked\" '.remaining = ((.remaining // []) - [$s])' \"$state\" > \"$tmp\" 2>/dev/null; then mv \"$tmp\" \"$state\"; else rm -f \"$tmp\"; fi",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "_purpose": "IRON RULE final gate — block turn end if pending skills were never invoked. Catches the case where the model reasoned its way out using only allowed tools (Read/Glob/Grep) and tried to finish without dispatching.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; pending=$(jq -r '.remaining | join(\", \")' \"$state\"); jq -n --arg s \"$pending\" '{decision: \"block\", reason: (\"[skill-router] You announced a chain but never invoked: \" + $s + \". Invoke the skill now or include [no-router] in your next prompt to override enforcement.\")}'",
+            "timeout": 3
           }
         ]
       }
     ]
   },
-
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.sh",

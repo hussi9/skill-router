@@ -10,3 +10,5 @@ marketing/
 
 # macOS
 .DS_Store
+__pycache__/
+.serena/

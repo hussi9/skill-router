@@ -85,22 +85,32 @@ This is why people install once and keep it: new skills published tomorrow get u
 
 ## What gets announced
 
-Two shapes — same testable contract.
+Two shapes — same testable contract. The exact format is mandated in `SKILL.md` → "ANNOUNCEMENT FORMAT". Every line starts with `[skill-router]` so the announcement is greppable from the transcript.
 
 **Single-domain** (one skill, no chain):
 ```
-This is an OPERATE task → superpowers:requesting-code-review → superpowers:code-reviewer agent.
+[skill-router] This is an OPERATE task → superpowers:requesting-code-review → superpowers:code-reviewer.
+[skill-router] Model: sonnet  ·  Thinking: think-hard
+[skill-router] Invoke now:
+
+▶ superpowers:requesting-code-review  (sonnet, in-session)
 ```
 
 **Multi-domain** (chain across domains):
 ```
-This touches 3 domains: UI/Frontend, DB, Edge function.
-Chain: writing-plans → dispatching-parallel-agents → frontend-design + db-expert
+[skill-router] This touches 3 domains: UI/Frontend, DB, Edge function.
+[skill-router] Chain: writing-plans → frontend-design + db-expert → vercel:deploy
+[skill-router] Models: sonnet · sonnet+sonnet · sonnet  ·  Thinking: think
+[skill-router] Invoke step 1/3 now:
+
+▶ writing-plans  (sonnet, in-session)
+▶ frontend-design + db-expert  (sonnet, parallel via Agent)
+▶ vercel:deploy  (sonnet, in-session)
 ```
 
 Operators in chains: `→` sequential (B depends on A), `+` parallel (no shared state).
 
-The announcement fires *before* any tool call. You can grep your transcript and verify what fired matches what was announced. That's the whole testability story.
+The announcement fires *before* any tool call. You can grep your transcript for `[skill-router]` and verify what fired matches what was announced. The `▶` lines are the dispatch-mode proof — they tell you which steps ran in-session and which were dispatched via `Agent` with a different model. That's the whole testability story.
 
 ## Statusline integration
 
@@ -125,7 +135,7 @@ Source data: `~/.claude/skill_usage.log` (per-skill firings) + `~/.claude/skill_
 2. **Deterministic.** Same input → same output. No vibes.
 3. **Fail-safe.** Ambiguous → higher-complexity path.
 4. **Living.** Catalog check picks up newly-installed skills automatically.
-5. **One file.** ~200 lines of routing logic, no build step, no dependencies.
+5. **One file.** ~265 lines of routing logic, no build step, no dependencies.
 
 ## What it doesn't do
 

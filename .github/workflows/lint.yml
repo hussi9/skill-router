@@ -50,3 +50,7 @@ jobs:
           grep -qi "named chain" SKILL.md || { echo "::error::SKILL.md missing Named Chain"; exit 1; }
           grep -qiE "Named Chains|named-chain" codex-skill/skill-router/SKILL.md || { echo "::error::Codex flavor missing Named Chains"; exit 1; }
           grep -qiE "Dispatch Protocol|per-step model" codex-skill/skill-router/SKILL.md || { echo "::error::Codex flavor missing Dispatch Protocol"; exit 1; }
+
+      - name: Run router unit tests
+        run: python3 -m unittest discover tests -v
+

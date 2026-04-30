@@ -86,6 +86,30 @@ AMBIGUOUS? → Default to HIGHER-COMPLEXITY path
 
 Single-line fix · reading code · one factual question · one command · under 3 trivial steps
 
+**Router precision contract:** when no triage signal matches (BROKEN/BUILD/OPERATE), the
+router emits **nothing** — silence is the correct output. A missing `[skill-router]` line
+means the prompt was conversational, exploratory, or trivial. Do not interpret silence as
+"OPERATE → refactor" by default; the router only suggests when it is confident.
+
+**Iron rule enforcement:** when the router *does* announce a chain, the announcement
+includes an `IRON RULE` block naming the next required `Skill(skill="<X>")` call. A
+`PreToolUse` hook denies state-changing tools (`Bash`, `Edit`, `Write`, `Task`) until that
+skill is invoked, and a `Stop` hook blocks turn end if it never was. Read/Glob/Grep/
+TodoWrite remain allowed so context-gathering still works.
+
+**Escape hatch:** include `[no-router]` in your prompt to disable enforcement for that
+turn. The router stays silent and writes no pending state, so all hooks pass through.
+
+**Calibration:** `tests/calibration.py` runs ~100 curated prompts through the router and
+reports precision/recall/F1 by triage path. Run with `--min-accuracy N` for a CI gate.
+Current baseline: **100% path accuracy, 95.2% skill accuracy**.
+
+**Learning loop:** `scripts/learn-from-history.py` joins announcement events
+(`~/.claude/skill_router_log.jsonl`) with actual Skill invocations (`~/.claude/
+skill_usage.log`) and surfaces tuning suggestions — which announced skills are ignored
+most often, and which Skill invocations the router missed. Run periodically to keep
+patterns calibrated to real usage.
+
 ---
 
 ## COMPLETION GATE
@@ -104,11 +128,8 @@ Before any "done" claim → `superpowers:verification-before-completion`
 ## COMPLEXITY RULE
 
 ```
-1 domain  → 1 skill
-2+ domains → announce chain, run in order
-
-"This touches [N] domains. Chain: [skill1] → [skill2] → ...
-Invoking step 1 now."
+1 domain  → 1 skill         → single-domain announcement
+2+ domains → announce chain   → multi-domain announcement
 ```
 
 Operators in the chain:
@@ -116,6 +137,58 @@ Operators in the chain:
 - `+` parallel (steps don't share state)
 
 Full chain syntax + standard shapes: see [`references/multi-domain-chaining.md`](./references/multi-domain-chaining.md).
+
+---
+
+## ANNOUNCEMENT FORMAT — Output VERBATIM (substitute only `<vars>`)
+
+The announcement is the testable contract. Users will `grep '\[skill-router\]'`
+their transcript to verify what fired matches what was announced. Format is
+non-negotiable. Output it BEFORE any other tool call (Read, Edit, Bash, Agent).
+
+**Single-domain (one skill, no chain):**
+```
+[skill-router] This is a <BROKEN|BUILD|OPERATE> task → <skill> → <agent>.
+[skill-router] Model: <model>  ·  Thinking: <thinking>
+[skill-router] Invoke now:
+
+▶ <skill>  (<model>, <in-session | via Agent>)
+```
+
+**Multi-domain (computed chain):**
+```
+[skill-router] This touches <N> domains: <d1>, <d2>, <d3>.
+[skill-router] Chain: <s1> → <s2> + <s3> → <s4>
+[skill-router] Models: <m1> · <m2>+<m3> · <m4>  ·  Thinking: <max-thinking>
+[skill-router] Invoke step 1/<N> now:
+
+▶ <s1>  (<m1>, <in-session | via Agent>)
+▶ <s2> + <s3>  (<m2>, parallel via Agent)
+▶ <s4>  (<m4>, <in-session | via Agent>)
+```
+
+**Multi-domain (saved chain wins):**
+```
+[skill-router] Using your saved chain `<name>`: <s1> → <s2> + <s3>
+[skill-router] Models: <m1> · <m2>+<m3>  ·  Thinking: <max-thinking>
+[skill-router] Invoke step 1/<N> now:
+
+▶ <s1>  (<m1>, <in-session | via Agent>)
+▶ <s2> + <s3>  (<m2>, parallel via Agent)
+```
+
+Rules:
+- `Models:` line uses `·` between sequential steps and `+` inside one parallel step.
+- `Thinking:` is the highest depth of any step (`none` / `think` / `think-hard` / `ultrathink`). Omit the field when every step is `none`.
+- Each `▶` line ends with one of: `in-session`, `via Agent`, or `parallel via Agent` — matching the dispatch protocol decision below.
+- After each step completes, output `[skill-router] Step <n>/<N> done.` before dispatching the next.
+- On chain end, output `[skill-router] Chain done.`
+
+Two layers of testability — keep them aligned:
+- **`[skill-router]` lines + `▶` markers** are the *human-readable* proof in the transcript. `grep '\[skill-router\]'` shows what was announced; the `▶` line shows the dispatch decision the parent made.
+- **`~/.claude/skill_router_log.jsonl`** events (`chain-start`, `chain-step`, `thinking-active`, `chain-end`) are the *machine-readable* proof read by `scripts/audit-dispatch.py` and the statusline. The `▶` line does NOT replace the JSONL `chain-step` event — write both. See [`references/dispatch-protocol.md`](./references/dispatch-protocol.md).
+
+Skipping the announcement format = silently breaking the testability claim.
 
 ---
 
@@ -210,9 +283,11 @@ Full event schema, common skip patterns, and verification: [`references/dispatch
 ## RED FLAGS — Signs You're About to Skip This
 
 ```
-"This is simple"          → Simple things take 5s to route. Skip routing = hours wasted.
-"I know what to do"       → Then routing confirms it. 5s cost, 0 downside.
-"No match in table"       → Run Catalog Check above before giving up.
-"Ambiguous task"          → Default to higher-complexity path (BUILD).
-"I already know the skill" → Still run catalog check — a better one may exist.
+"This is simple"            → Simple things take 5s to route. Skip routing = hours wasted.
+"I know what to do"         → Then routing confirms it. 5s cost, 0 downside.
+"No match in table"         → Run Catalog Check above before giving up.
+"Ambiguous task"            → Default to higher-complexity path (BUILD).
+"I already know the skill"  → Still run catalog check — a better one may exist.
+"I'll just paraphrase"      → No. Output the [skill-router] format VERBATIM. Greppability is the contract.
+"I can skip the ▶ lines"    → No. Per-step ▶ lines are the dispatch-mode proof. Without them the audit script can't score the chain.
 ```
