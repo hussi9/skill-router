@@ -59,6 +59,11 @@ BROKEN_RE = _re(
     r"\bci (failed|is failing)\b",
     r"\b(this is|you are) wrong\b", r"\bdoesn'?t work\b",
     r"\bbug\b", r"\bregress(ion|ed)\b",
+    # Framework compliance errors — violations are broken states, not new features
+    r"\bviolations?\b", r"\bnoncompliant\b",
+    r"\bsuspense (boundary|wrapper|error|violations?)\b",
+    r"\bstatic (render|generation|export) (fail\w*|error)\b",
+    r"\bfailed\b",  # 'X failed' is always a broken state
 )
 
 BUILD_RE = _re(
@@ -433,28 +438,34 @@ def escape_active(prompt: str) -> bool:
     return any(m in lower for m in ESCAPE_MARKERS)
 
 
-def write_pending(chain: list[Step]) -> None:
+def write_pending(chain: list[Step], path: str, domains: list[str]) -> None:
     """Persist the announced skill chain so PreToolUse / Stop hooks can enforce it.
 
     State file shape:
       {
         "ts": "...",
         "primary": "<first announced skill>",
-        "remaining": ["<first>", "<second>", ...],
-        "all": ["<first>", "<second>", ...]
+        "remaining": ["<in-session steps only>"],
+        "all": ["<all announced steps>"]
       }
 
-    Hooks read .primary to decide whether to block tool calls. PostToolUse
-    on Skill removes the matched skill from .remaining. When .remaining is
-    empty the gate is lifted.
+    Only in-session Skill() calls are tracked in .remaining. Parallel
+    agent-dispatched steps (the domain skills in multi-domain BUILD chains)
+    are excluded — they run inside sub-agents and never call Skill() in the
+    parent session, so leaving them in .remaining would deadlock the Stop hook.
     """
     if not chain:
         return
+    # Multi-domain BUILD: chain[0] is in-session (writing-plans), chain[1:]
+    # are parallel fan-outs dispatched via Agent(). Only track chain[0].
+    is_multi = (path == "BUILD" and len(domains) >= 2 and len(chain) >= 2
+                and chain[0].skill == "superpowers:writing-plans")
+    in_session = chain[:1] if is_multi else chain
     PENDING.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "primary": chain[0].skill,
-        "remaining": [s.skill for s in chain],
+        "primary": in_session[0].skill,
+        "remaining": [s.skill for s in in_session],
         "all": [s.skill for s in chain],
     }
     PENDING.write_text(json.dumps(payload) + "\n")
@@ -663,7 +674,7 @@ def main() -> int:
     if announcement:
         print(announcement)
         log_chain(path, chain, domains)
-        write_pending(chain)
+        write_pending(chain, path, domains)
     elif os.environ.get("SKILL_ROUTER_DEBUG") == "1":
         print(f"[skill-router] (silent — no clear route for prompt of {len(prompt)} chars)", file=sys.stderr)
     return 0
