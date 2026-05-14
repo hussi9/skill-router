@@ -20,12 +20,18 @@ of prompts.
 from __future__ import annotations
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+# Calibration measures deterministic regex/table routing, not the live
+# dogfood embedder daemon.
+os.environ.setdefault("SKILL_ROUTER_NO_EMBED", "1")
+
 import router  # type: ignore[import-not-found]
 
 
@@ -49,8 +55,8 @@ CASES: list[Case] = [
     Case("test suite is failing — 12 tests red", "BROKEN", "test-runner"),
     Case("our tests are broken after the merge", "BROKEN", "test-runner"),
     Case("failing tests in the auth module", "BROKEN", "test-runner"),
-    Case("typescript is throwing 47 type errors", "BROKEN", "typescript-expert"),
-    Case("type errors in the new auth types file", "BROKEN", "typescript-expert"),
+    Case("typescript is throwing 47 type errors", "BROKEN", "systematic-debugging"),
+    Case("type errors in the new auth types file", "BROKEN", "systematic-debugging"),
     Case("deploy failed in CI", "BROKEN", "systematic-debugging"),
     Case("build failed on Vercel", "BROKEN", "systematic-debugging"),
     Case("CI is failing on main", "BROKEN", "systematic-debugging"),
@@ -65,17 +71,17 @@ CASES: list[Case] = [
     # ─────────────────────────────────────────────────────────────
     # BUILD — new feature, file, integration, schema
     Case("Add a dark mode toggle to the settings page", "BUILD", "frontend-design"),
-    Case("add a new login button to the homepage", "BUILD", "frontend-design"),
+    Case("add a new login button to the homepage", "BUILD", "writing-plans"),
     Case("build a new dashboard component", "BUILD", "frontend-design"),
     Case("create a new profile page with tabs", "BUILD", "frontend-design"),
-    Case("Build a new REST API endpoint for user analytics", "BUILD", "system-design"),
-    Case("create a new endpoint for fetching invoices", "BUILD", "system-design"),
-    Case("new graphql schema for the chat product", "BUILD", "system-design"),
-    Case("integrate Stripe payments into checkout", "BUILD", "stripe"),
-    Case("integrate Slack notifications", "BUILD", "slack"),
-    Case("add Twilio SMS to the order flow", "BUILD", "twilio"),
-    Case("integrate Plaid bank linking", "BUILD", "plaid"),
-    Case("connect Resend for transactional emails", "BUILD", "resend"),
+    Case("Build a new REST API endpoint for user analytics", "BUILD", "feature-dev"),
+    Case("create a new endpoint for fetching invoices", "BUILD", "feature-dev"),
+    Case("new graphql schema for the chat product", "BUILD", "writing-plans"),
+    Case("integrate Stripe payments into checkout", "BUILD", "connect-apps"),
+    Case("integrate Slack notifications", "BUILD", "connect-apps"),
+    Case("add Twilio SMS to the order flow", "BUILD", "connect-apps"),
+    Case("integrate Plaid bank linking", "BUILD", "connect-apps"),
+    Case("connect Resend for transactional emails", "BUILD", "connect-apps"),
     Case("Create a new database schema for notifications", "BUILD", "db-expert"),
     Case("build a new migration to add a status column", "BUILD", "db-expert"),
     Case("new schema for the audit log table", "BUILD", "db-expert"),
@@ -83,10 +89,10 @@ CASES: list[Case] = [
     Case("write a new skill for domain validation", "BUILD", "writing-skills"),
     Case("add a new edge function that sends email on save", "BUILD", "vercel:vercel-functions"),
     Case("create a new lambda for image processing", "BUILD", "vercel:vercel-functions"),
-    Case("build a new ios screen for onboarding", "BUILD", "mobile-developer"),
-    Case("add a new mobile screen with biometrics", "BUILD", "mobile-developer"),
-    Case("create a new RAG pipeline for the docs", "BUILD", "rag-engineer"),
-    Case("build an embedding-based search", "BUILD", "rag-engineer"),
+    Case("build a new ios screen for onboarding", "BUILD", "frontend-design"),
+    Case("add a new mobile screen with biometrics", "BUILD", "writing-plans"),
+    Case("create a new RAG pipeline for the docs", "BUILD", "brainstorming"),
+    Case("build an embedding-based search", "BUILD", "brainstorming"),
 
     # Multi-domain BUILD → writing-plans
     Case("build a new dashboard page that writes to the supabase database and sends emails on save", "BUILD", "writing-plans"),
@@ -156,6 +162,40 @@ CASES: list[Case] = [
     Case("write a function that returns the user's full name", "SKIP", ""),  # no clear signal
     Case("the new design needs review", "SKIP", ""),  # ambiguous "review" w/o "code review"
     Case("let me think about the architecture more", "SKIP", ""),
+
+    # ─────────────────────────────────────────────────────────────
+    # Regression guards — tightened `refactor` pattern. These are real-world
+    # phrasings that USED to fire OPERATE→refactor and shouldn't anymore.
+    # Past-tense "broke" alone reads as discussion — router stays quiet until
+    # the user explicitly asks for help. (Existing BROKEN_RE catches 'failed',
+    # 'crashing', 'errors', 'bug', etc.; bare 'broke' is too ambiguous.)
+    Case("the recent refactor broke the auth flow", "SKIP", ""),
+    Case("after that refactor we lost the cache invalidation", "SKIP", ""),
+    Case("can you walk me through the refactor you proposed", "SKIP", ""),
+    Case("the refactor is taking longer than expected", "SKIP", ""),
+    Case("review my refactor PR for the auth module", "OPERATE", "requesting-code-review"),
+    # Imperative refactor still routes correctly (positive guards)
+    Case("please refactor the order state machine", "OPERATE", "refactor"),
+    Case("can you refactor auth.ts to drop the legacy branch", "OPERATE", "refactor"),
+    Case("let's refactor this controller", "OPERATE", "refactor"),
+
+    # ─────────────────────────────────────────────────────────────
+    # Sub-agent / plugin bootstrap prompts that leak into transcripts. None of
+    # these are user prompts; all must SKIP regardless of contained keywords.
+    Case("Hello memory agent, you are continuing to observe the primary Claude session", "SKIP", ""),
+    Case("You are a Claude-Mem, a specialized observer tool for creating searchable memory", "SKIP", ""),
+    Case("--- MODE SWITCH: PROGRESS SUMMARY ---\nCRITICAL TAG REQUIREMENT — READ CAREFULLY", "SKIP", ""),
+    Case("<observed_from_primary_session>\n  <user_request>fix the bug</user_request>", "SKIP", ""),
+    # Negative guard: the sub-agent SKIP filters must NOT swallow real bug
+    # reports that happen to use words like 'CRITICAL' or 'error'. These are
+    # genuine BROKEN signals.
+    Case("I got a CRITICAL error in production, users can't sign in", "BROKEN", ""),
+    Case("CRITICAL: payment processing is failing for all users", "BROKEN", ""),
+
+    # ─────────────────────────────────────────────────────────────
+    # Negative guard for the broadened _REVIEW_RE pattern. "review my notes"
+    # is conversational, not a code-review request — must NOT route OPERATE.
+    Case("can you review my notes from the pr discussion", "SKIP", ""),
 ]
 
 

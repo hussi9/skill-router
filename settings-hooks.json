@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "prompt=$(jq -r '.prompt // empty'); [ -z \"$prompt\" ] && exit 0; out=$(echo \"$prompt\" | python3 ~/.claude/skills/skill-router/scripts/router.py 2>/dev/null); [ -z \"$out\" ] && exit 0; jq -n --arg msg \"$out\" '{systemMessage: $msg, hookSpecificOutput: {hookEventName: \"UserPromptSubmit\", additionalContext: $msg}}'",
+            "command": "prompt=$(jq -r '.prompt // empty'); [ -z \"$prompt\" ] && exit 0; out=$(SKILL_ROUTER_HOOK_MODE=1 python3 ~/.claude/skills/skill-router/scripts/router.py <<< \"$prompt\" 2>/dev/null); [ -z \"$out\" ] && exit 0; jq -n --arg msg \"$out\" '{systemMessage: $msg, hookSpecificOutput: {hookEventName: \"UserPromptSubmit\", additionalContext: $msg}}'",
             "timeout": 3
           }
         ]
@@ -55,6 +55,18 @@
           {
             "type": "command",
             "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; pending=$(jq -r '.remaining | join(\", \")' \"$state\"); jq -n --arg s \"$pending\" '{decision: \"block\", reason: (\"[skill-router] You announced a chain but never invoked: \" + $s + \". Invoke the skill now or include [no-router] in your next prompt to override enforcement.\")}'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "_purpose": "Backstop for plugin runtime deps. Claude Code drops new plugin versions into ~/.claude/plugins/cache/<owner>/<plugin>/<version>/ but never runs `bun install` against the bundled package.json, so workers (e.g. claude-mem worker-service.cjs) fail with 'Cannot find module zod/v3'. This hook runs scripts/ensure-plugin-deps.sh in the background — it's idempotent and skips dirs that already have node_modules, so cost is ~0 once steady-state.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/skills/skill-router/scripts/ensure-plugin-deps.sh >/dev/null 2>&1 &",
             "timeout": 3
           }
         ]

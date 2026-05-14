@@ -18,6 +18,7 @@ Exit codes:
 """
 from __future__ import annotations
 import functools
+import hashlib
 import json
 import os
 import re
@@ -46,6 +47,19 @@ ESCAPE_MARKERS = ("[no-router]", "[skip-router]", "[router-off]")
 
 def _re(*patterns: str) -> list[re.Pattern[str]]:
     return [re.compile(p, re.IGNORECASE) for p in patterns]
+
+# 'refactor' imperative patterns. Shared by OPERATE_RE (which decides triage)
+# and _REFACTOR_RE (which decides the chain inside build_operate_chain) so the
+# two can never disagree. Match imperative usage only — bare \brefactor\b is
+# the largest source of false positives (123× announced, 0× invoked in 30-day
+# production data) because the word appears constantly in conversational
+# context ("the recent refactor broke X", "after that refactor").
+_REFACTOR_IMPERATIVE_PATTERNS: tuple[str, ...] = (
+    r"^\s*(please\s+)?refactor\b",                                          # sentence-initial
+    r"\b(can|could|please|let'?s|help (me|us))\s+(\w+\s+){0,2}refactor\b",  # polite/auxiliary
+    r"\brefactor\s+(the|this|that|my|our|all|every|some|each)\b",           # refactor <article>
+    r"\brefactor\s+[\w/.-]+\.(ts|tsx|js|jsx|py|rb|go|java|cs|cpp|c|rs|swift|kt|md|sql|sh)\b",  # refactor <file>
+)
 
 BROKEN_RE = _re(
     r"\berror\b", r"\bcrash(es|ed|ing)?\b", r"\bexception\b",
@@ -79,12 +93,14 @@ BUILD_RE = _re(
 )
 
 OPERATE_RE = _re(
-    r"\brefactor\b",
+    # 'refactor' imperatives — see _REFACTOR_IMPERATIVE_PATTERNS for rationale.
+    *_REFACTOR_IMPERATIVE_PATTERNS,
     r"\bclean(?:ed)?(?:\s+\w+){0,3}\s+up\b",  # clean up, cleaned up, clean it up, clean the auth service up
     r"\btidy\b", r"\bsimplif(y|ies|ied)\b",
     r"\badd (test|coverage|tests)\b",
     r"\bdeploy\b",
-    r"\breview my pr\b", r"\bcode review\b", r"\bpr review\b",
+    r"\breview my\s+(?:\w+\s+){0,3}(?:pr|pull request)\b",  # 'review my pr', 'review my refactor PR'
+    r"\bcode review\b", r"\bpr review\b",
     # 'merge' / 'ship' — ONLY when used as an imperative verb at the start
     # of the prompt, not when referenced ('ship the pricing change',
     # 'merge conflict in main'). Anchored to start-of-prompt.
@@ -133,6 +149,18 @@ SKIP_RE = _re(
     r"^\s*<task-notification>",
     r"^\s*<task-id>",
     r"^\s*The user (sent|ran|just)",  # harness-injected user-action narration
+    # Sub-agent / plugin bootstrap prompts. The real-prompt sampler shows
+    # claude-mem and other plugins inject role-instruction text into the
+    # transcript ('Hello memory agent...', 'You are a Claude-Mem...',
+    # '--- MODE SWITCH: PROGRESS SUMMARY ---'). These are NOT user prompts
+    # and route to BROKEN due to broad keywords like \berror\b in their bodies,
+    # which is the dominant source of `systematic-debugging` over-firing.
+    r"^\s*Hello\s+(?:memory|claude|chat|router)[\s,-]+(?:agent|bot)\b",
+    r"^\s*You are (?:a |the |an )?(?:Claude-?Mem|specialized\s+(?:observer|memory|router))",
+    r"^\s*---\s*MODE SWITCH",
+    r"^\s*<observed_from_primary_session>",
+    r"\bCRITICAL TAG REQUIREMENT\b",
+    r"^\s*(?:CRITICAL|IMPORTANT):\s+(?:Record|Observe|Watch|Track)\b",
 )
 
 # ---- Domain detection -------------------------------------------------------
@@ -278,10 +306,26 @@ _TESTS_FAILING_RE = re.compile(
 )
 _TYPESCRIPT_RE = re.compile(r"\btypescript|type errors?\b", re.IGNORECASE)
 _NEW_SKILL_RE = re.compile(r"\bwrite (?:a |new |a new )?(?:claude )?skill(?: file)?\b", re.IGNORECASE)
-_REFACTOR_RE = re.compile(r"\brefactor\b|\bclean(?:ed)?(?:\s+\w+){0,3}\s+up\b|\btidy\b|\bsimplif(y|ies|ied)\b", re.IGNORECASE)
+# Mirror OPERATE_RE refactor imperatives so build_operate_chain agrees with
+# triage. Synonyms (clean up / tidy / simplify) stay broad — they're far less
+# ambiguous than bare 'refactor'.
+_REFACTOR_RE = re.compile(
+    "|".join((
+        *_REFACTOR_IMPERATIVE_PATTERNS,
+        r"\bclean(?:ed)?(?:\s+\w+){0,3}\s+up\b",
+        r"\btidy\b",
+        r"\bsimplif(y|ies|ied)\b",
+    )),
+    re.IGNORECASE,
+)
 _ADD_TESTS_RE = re.compile(r"\badd (tests?|coverage|test coverage)\b", re.IGNORECASE)
 _DEPLOY_RE = re.compile(r"\bdeploy\b", re.IGNORECASE)
-_REVIEW_RE = re.compile(r"\b(review my pr|code review|pr review)\b", re.IGNORECASE)
+_REVIEW_RE = re.compile(
+    r"\breview my\s+(?:\w+\s+){0,3}(?:pr|pull request)\b"
+    r"|\bcode review\b"
+    r"|\bpr review\b",
+    re.IGNORECASE,
+)
 _MERGE_SHIP_RE = re.compile(r"\bmerge\b|\bship\b", re.IGNORECASE)
 
 
@@ -637,7 +681,19 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     domains = detect_domains(prompt)
     path = triage(prompt)
     if path == "SKIP":
-        return path, [], domains, ""
+        # Local embedding fallback — fail-open. The daemon is local-only
+        # (Unix socket, fastembed ONNX, zero network). If it's down, missing,
+        # or low-confidence, we keep today's silent SKIP behavior. The
+        # fallback can NEVER override a confident regex match because the
+        # regex always runs first.
+        rescued = _try_embedding_fallback(prompt)
+        if rescued is not None:
+            path, chain, domains = rescued
+            ghost = next((s.skill for s in chain if not valid_skill(s.skill)), None)
+            if ghost is None:
+                return path, chain, domains, render(path, chain, domains)
+            print(f"[skill-router-warn] embedding ghost skill: {ghost}", file=sys.stderr)
+        return "SKIP", [], domains, ""
     if path == "BROKEN":
         chain = build_broken_chain(prompt)
     elif path == "BUILD":
@@ -655,13 +711,117 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     return path, chain, domains, render(path, chain, domains)
 
 
+def _try_embedding_fallback(prompt: str) -> Optional[tuple[str, list[Step], list[str]]]:
+    """Ask the local embedder daemon to rescue a SKIP-classified prompt.
+
+    Returns (path, chain, domains) if the daemon returns a confident match
+    that matches an existing route table entry, or None to keep silent SKIP.
+
+    Active only in the real hook path (SKILL_ROUTER_HOOK_MODE=1) or explicit
+    embedder tests/manual probes (SKILL_ROUTER_EMBED=1). Disabled entirely
+    when SKILL_ROUTER_NO_EMBED=1 is set.
+    """
+    if os.environ.get("SKILL_ROUTER_NO_EMBED") == "1":
+        return None
+    if (
+        os.environ.get("SKILL_ROUTER_HOOK_MODE") != "1"
+        and os.environ.get("SKILL_ROUTER_EMBED") != "1"
+    ):
+        return None
+    try:
+        # Lazy import — keeps router import side-effect-free for tests that
+        # don't need the embedder, and avoids any startup cost when the
+        # SKIP path doesn't fire.
+        from embedder_client import classify  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    result = classify(prompt)
+    if not result or result.get("path") not in {"BROKEN", "BUILD", "OPERATE"}:
+        _log_embedding_attempt(prompt, result, accepted=False)
+        return None
+    path = result["path"]
+    skill = result.get("skill", "")
+    if not skill or not valid_skill(skill):
+        _log_embedding_attempt(prompt, result, accepted=False, rejected_skill=skill or None)
+        return None
+
+    # Build a single-step chain matching the embedder's recommendation.
+    # We do NOT trust the embedder to do multi-domain build chains — those
+    # require domain detection, which the regex layer already does. Single-
+    # step is the safe wedge.
+    if path == "BROKEN":
+        chain = [Step(skill, "general-purpose", "sonnet", "think")]
+    elif path == "BUILD":
+        chain = [Step(skill, "feature-dev:code-architect", "sonnet", "think")]
+    else:  # OPERATE
+        chain = [Step(skill, "general-purpose", "sonnet", "none")]
+
+    _log_embedding_attempt(prompt, result, accepted=True)
+
+    return path, chain, []
+
+
+def _log_embedding_attempt(
+    prompt: str,
+    result: Optional[dict],
+    *,
+    accepted: bool,
+    rejected_skill: Optional[str] = None,
+) -> None:
+    """Log every daemon response so dogfood data can tune recall safely.
+
+    Prompt text is private by default: store a hash and length. Set
+    SKILL_ROUTER_LOG_EMBED_PROMPTS=1 for short local tuning sessions when
+    reviewing raw prompts is useful.
+    """
+    if not result:
+        return
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        prompt_hash = hashlib.sha256(
+            prompt.encode("utf-8", errors="replace")
+        ).hexdigest()[:16]
+        payload = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "type": "embedding-route" if accepted else "embedding-skip",
+            "accepted": accepted,
+            "path": result.get("path"),
+            "reason": result.get("reason"),
+            "skill": result.get("skill"),
+            "rejected_skill": rejected_skill,
+            "confidence": result.get("confidence"),
+            "agreement": result.get("agreement"),
+            "winner_count": result.get("winner_count"),
+            "avg_sim": result.get("avg_sim"),
+            "winner_avg_sim": result.get("winner_avg_sim"),
+            "runner_up_avg_sim": result.get("runner_up_avg_sim"),
+            "margin": result.get("margin"),
+            "ms": result.get("_ms"),
+            "prompt_hash": prompt_hash,
+            "prompt_len": len(prompt),
+            "neighbors": result.get("neighbors"),
+        }
+        if os.environ.get("SKILL_ROUTER_LOG_EMBED_PROMPTS") == "1":
+            payload["prompt"] = prompt
+        with LOG.open("a") as f:
+            f.write(json.dumps(payload) + "\n")
+    except OSError:
+        pass
+
+
 def main() -> int:
     prompt = os.environ.get("CLAUDE_USER_INPUT", "") or sys.stdin.read()
     prompt = prompt.strip()
+    # Hook-mode gate: only the UserPromptSubmit hook should mutate the live
+    # iron-rule state. CLI invocations (testing, scripts, dashboards) must not
+    # poison ~/.claude/skill_router_pending.json — that would block tools in
+    # the user's active session. The hook command sets SKILL_ROUTER_HOOK_MODE=1.
+    hook_mode = os.environ.get("SKILL_ROUTER_HOOK_MODE") == "1"
     # Always reset pending state at turn start — prevents a stale entry from a
     # previous turn from blocking this turn's tools, and means a misrouted
     # turn naturally clears itself when the user types a follow-up.
-    clear_pending()
+    if hook_mode:
+        clear_pending()
     if not prompt:
         return 0
     # Escape hatch: user explicitly opts out of routing for this turn.
@@ -675,7 +835,8 @@ def main() -> int:
     if announcement:
         print(announcement)
         log_chain(path, chain, domains)
-        write_pending(chain, path, domains)
+        if hook_mode:
+            write_pending(chain, path, domains)
     elif os.environ.get("SKILL_ROUTER_DEBUG") == "1":
         print(f"[skill-router] (silent — no clear route for prompt of {len(prompt)} chars)", file=sys.stderr)
     return 0
