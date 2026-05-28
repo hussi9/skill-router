@@ -30,6 +30,27 @@ from typing import Optional
 
 LOG = Path.home() / ".claude" / "skill_router_log.jsonl"
 PENDING = Path.home() / ".claude" / "skill_router_pending.json"
+STRIKES = Path.home() / ".claude" / "skill_router_strikes.json"
+# Local + online catalog snapshots. Local lists installed skills; online lists
+# uninstallable-but-discoverable skills (antigravity, anthropic marketplace,
+# etc.). The online catalog powers the "you don't have this but it'd fit"
+# soft-suggestion path — strictly local file reads, no network.
+LOCAL_CATALOG_FILE = Path.home() / ".claude" / "skill_router_catalog.json"
+ONLINE_CATALOG_FILE = Path.home() / ".claude" / "skill_router_online_catalog.json"
+# Online-suggestion confidence floor — see suggest_online_skill() for scoring.
+# 0.5 = at least half the prompt tokens overlap with the skill text or vice
+# versa (whichever is smaller). Tuned to suppress noise on short prompts.
+ONLINE_SUGGEST_THRESHOLD = 0.5
+# Minimum prompt-token overlap count required before scoring kicks in. Below
+# 3 overlapping tokens (≥4 chars each), even a high Jaccard is too noisy on
+# short skill descriptions to trust.
+ONLINE_SUGGEST_MIN_OVERLAP = 3
+# A skill that has `STRIKE_THRESHOLD` consecutive unsatisfied announcements
+# (turn ended with skill in pending state and never invoked) moves to SOFT
+# mode: silently dropped from future announcements until a successful invoke
+# resets its counter. Self-tuning — bad routes auto-demote, good ones recover
+# the moment they're actually used.
+STRIKE_THRESHOLD = 2
 SKILLS_DIR = Path.home() / ".claude" / "skills"
 PLUGINS_DIR = Path.home() / ".claude" / "plugins" / "cache"
 # Commands and agents both surface as valid `Skill(skill="<name>")` targets
@@ -198,7 +219,7 @@ class Step:
 
 DOMAIN_SKILL: dict[str, Step] = {
     "UI/Frontend":   Step("frontend-design:frontend-design", "feature-dev:code-architect", "sonnet", "none"),
-    "DB schema":     Step("db-expert", "db-expert", "sonnet", "think"),
+    "DB schema":     Step("superpowers:writing-plans", "db-expert", "sonnet", "think"),
     "API/Backend":   Step("feature-dev:feature-dev", "feature-dev:code-architect", "sonnet", "think"),
     "Edge function": Step("vercel:vercel-functions", "integration-specialist", "sonnet", "none"),
     "Auth":          Step("security", "security-auditor", "opus", "ultrathink"),
@@ -518,9 +539,119 @@ def write_pending(chain: list[Step], path: str, domains: list[str]) -> None:
 
 def clear_pending() -> None:
     """Clear the pending-state file. Called at the start of each user turn so
-    nothing carries over across turns and a misroute cannot deadlock."""
-    if PENDING.is_file():
-        PENDING.write_text("{}\n")
+    nothing carries over across turns and a misroute cannot deadlock.
+
+    Side effect: any skills still in `.remaining` when this fires were
+    announced but never invoked — each one gets +1 strike. At STRIKE_THRESHOLD
+    consecutive strikes the skill goes soft (silently dropped from future
+    announcements until a successful invoke resets the counter).
+    """
+    if not PENDING.is_file():
+        return
+    try:
+        prior = json.loads(PENDING.read_text() or "{}")
+        unsatisfied = prior.get("remaining") or []
+        if unsatisfied:
+            _bump_strikes(unsatisfied)
+    except (json.JSONDecodeError, OSError):
+        pass
+    PENDING.write_text("{}\n")
+
+
+# ---- Strike-based soft-mode (per-skill follow-rate enforcement) -------------
+
+def _load_strikes() -> dict[str, int]:
+    """Return the strike map. Fail-open with {} on any error."""
+    if not STRIKES.is_file():
+        return {}
+    try:
+        data = json.loads(STRIKES.read_text() or "{}")
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_strikes(strikes: dict[str, int]) -> None:
+    try:
+        STRIKES.parent.mkdir(parents=True, exist_ok=True)
+        STRIKES.write_text(json.dumps(strikes, sort_keys=True) + "\n")
+    except OSError:
+        pass
+
+
+def _bump_strikes(skills: list[str]) -> None:
+    """Increment strike count for each skill in the list."""
+    if not skills:
+        return
+    strikes = _load_strikes()
+    for s in skills:
+        if not isinstance(s, str) or not s:
+            continue
+        strikes[s] = int(strikes.get(s, 0)) + 1
+    _write_strikes(strikes)
+
+
+def reset_strikes(skill: str) -> None:
+    """Reset (delete) strikes for `skill`. Called via PostToolUse Skill hook
+    so any successful invoke re-arms the skill for IRON enforcement next time."""
+    if not skill:
+        return
+    strikes = _load_strikes()
+    if skill in strikes:
+        del strikes[skill]
+        _write_strikes(strikes)
+
+
+def is_soft(skill: str) -> bool:
+    """True if `skill` has accumulated >= STRIKE_THRESHOLD consecutive
+    unsatisfied announcements. Soft skills are silently dropped from the
+    announcement and never written to pending state (no IRON enforcement)."""
+    return int(_load_strikes().get(skill, 0)) >= STRIKE_THRESHOLD
+
+
+# ---- Personalized re-ranking from 30-day history ---------------------------
+
+HISTORY = Path.home() / ".claude" / "skill_router_history.json"
+
+
+@functools.lru_cache(maxsize=1)
+def _load_history() -> dict:
+    """Return the per-skill history map computed by the history miner.
+
+    The file is written periodically by scripts that analyze
+    `skill_usage.log` + `skill_router_log.jsonl` over a 30-day window.
+    Fail-open with {} on any read or schema error — routing falls back to
+    embedder confidence with no personalization.
+    """
+    if not HISTORY.is_file():
+        return {}
+    try:
+        data = json.loads(HISTORY.read_text() or "{}")
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _history_follow_rate(skill: str) -> Optional[float]:
+    """Return the 30-day announcement→invocation ratio for `skill`, or None
+    if there's not enough data to judge (default-open). The embedder fallback
+    uses this to refuse rescues for skills the user routinely ignores."""
+    hist = _load_history()
+    per_skill = hist.get("per_skill") if isinstance(hist, dict) else None
+    if not isinstance(per_skill, dict):
+        return None
+    entry = per_skill.get(skill)
+    if not isinstance(entry, dict):
+        return None
+    # Need at least 3 announcements before the ratio means anything —
+    # 0/1 is noise, 0/10 is signal.
+    announcements = entry.get("announcements")
+    if not isinstance(announcements, int) or announcements < 3:
+        return None
+    fr = entry.get("follow_rate")
+    if isinstance(fr, (int, float)):
+        return float(fr)
+    return None
 
 
 # ---- Skill catalog (ghost-skill guard) -------------------------------------
@@ -676,6 +807,13 @@ def log_chain(path: str, chain: list[Step], domains: list[str]) -> None:
 
 # ---- Entry point ------------------------------------------------------------
 
+def _drop_soft(chain: list[Step]) -> list[Step]:
+    """Filter out steps whose skill is in soft mode (>= STRIKE_THRESHOLD
+    consecutive unsatisfied announcements). Silent: no announcement, no
+    enforcement, no log noise. Returns a new list; original untouched."""
+    return [s for s in chain if not is_soft(s.skill)]
+
+
 def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     """Return (path, chain, domains, announcement)."""
     domains = detect_domains(prompt)
@@ -691,6 +829,9 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
             path, chain, domains = rescued
             ghost = next((s.skill for s in chain if not valid_skill(s.skill)), None)
             if ghost is None:
+                chain = _drop_soft(chain)
+                if not chain:
+                    return "SKIP", [], domains, ""
                 return path, chain, domains, render(path, chain, domains)
             print(f"[skill-router-warn] embedding ghost skill: {ghost}", file=sys.stderr)
         return "SKIP", [], domains, ""
@@ -707,6 +848,12 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     ghost = next((s.skill for s in chain if not valid_skill(s.skill)), None)
     if ghost is not None:
         print(f"[skill-router-warn] skipping ghost skill: {ghost}", file=sys.stderr)
+        return "SKIP", [], domains, ""
+    # Soft-mode filter: drop steps whose skill has struck out. If nothing
+    # left, the whole route goes silent — the model isn't asked to invoke
+    # something that history shows it will ignore.
+    chain = _drop_soft(chain)
+    if not chain:
         return "SKIP", [], domains, ""
     return path, chain, domains, render(path, chain, domains)
 
@@ -743,6 +890,16 @@ def _try_embedding_fallback(prompt: str) -> Optional[tuple[str, list[Step], list
     skill = result.get("skill", "")
     if not skill or not valid_skill(skill):
         _log_embedding_attempt(prompt, result, accepted=False, rejected_skill=skill or None)
+        return None
+
+    # Personalized re-rank: even when the embedder is confident, defer to the
+    # user's actual 30-day follow rate. If history shows they routinely ignore
+    # this skill (<30% follow with ≥3 announcements), refuse the rescue and
+    # let the prompt stay SKIP. Avoids the embedder reviving a skill the strike
+    # rule would just demote on next miss.
+    fr = _history_follow_rate(skill)
+    if fr is not None and fr < 0.30:
+        _log_embedding_attempt(prompt, result, accepted=False, rejected_skill=f"{skill} (history_follow_rate={fr:.2f})")
         return None
 
     # Build a single-step chain matching the embedder's recommendation.
@@ -809,6 +966,171 @@ def _log_embedding_attempt(
         pass
 
 
+# ---- Online-catalog soft suggestion -----------------------------------------
+#
+# Last-resort path. When regex triage AND embedding fallback both returned
+# SKIP, we still might be able to point the user at an online skill they
+# haven't installed yet. This is advisory only — no IRON enforcement, no
+# pending state. Token-overlap scoring (zero network, cheap) by design:
+# loading the embedder for skills the user doesn't have is wasted compute,
+# and the local-first principle prohibits any cloud call on the hot path.
+
+# Tiny stopword set — only the highest-frequency English filler words that
+# would otherwise dominate the token overlap. Kept short so we don't strip
+# legitimate signal (e.g., "use", "new" can be meaningful in skill names).
+_STOPWORDS: frozenset[str] = frozenset({
+    "about", "above", "after", "again", "also", "and", "any", "are", "because",
+    "been", "before", "being", "between", "both", "but", "can", "could", "did",
+    "does", "doing", "done", "down", "during", "each", "few", "for", "from",
+    "had", "has", "have", "having", "her", "here", "him", "his", "how", "into",
+    "its", "itself", "just", "like", "make", "many", "more", "most", "much",
+    "must", "need", "now", "off", "once", "only", "other", "our", "ours", "out",
+    "over", "own", "same", "she", "should", "some", "such", "than", "that",
+    "the", "their", "them", "then", "there", "these", "they", "this", "those",
+    "through", "too", "under", "until", "very", "was", "way", "were", "what",
+    "when", "where", "which", "while", "who", "whom", "why", "will", "with",
+    "would", "you", "your", "yours", "yourself",
+})
+
+# Pre-compiled token splitter — strip everything that isn't a word char. Used
+# for both prompt and skill-description tokenization so the two are comparable.
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> set[str]:
+    """Lowercase, regex-split, drop stopwords + tokens shorter than 4 chars.
+
+    Returns a set (order doesn't matter for overlap scoring) — duplicates
+    inside the prompt or skill description don't double-count.
+    """
+    if not text:
+        return set()
+    return {
+        t for t in _WORD_RE.findall(text.lower())
+        if len(t) >= 4 and t not in _STOPWORDS
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
+    """Load the online catalog once and pre-tokenize every novel entry.
+
+    Returns a list of (entry, tokens) pairs for entries where:
+      - `installed` is False, AND
+      - `name` is NOT present in the local installed catalog (i.e., the 810
+        truly-novel set from the 1,697 total online entries).
+
+    Pre-tokenization is the perf trick: we pay it once per process, then
+    every prompt does O(novel_skills) set-intersections (fast). Returns
+    None if either catalog file is missing / malformed — caller fails open.
+    """
+    try:
+        if not ONLINE_CATALOG_FILE.is_file():
+            return None
+        online = json.loads(ONLINE_CATALOG_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    # Local catalog: name → installed. Treat missing local file as "nothing
+    # installed" (every online entry is novel) so the suggestion still works
+    # in a fresh setup. The router will still ghost-guard before announcing.
+    local_names: set[str] = set()
+    try:
+        if LOCAL_CATALOG_FILE.is_file():
+            local = json.loads(LOCAL_CATALOG_FILE.read_text())
+            for entry in local.get("entries", []):
+                name = entry.get("name")
+                if name:
+                    local_names.add(name)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    index: list[tuple[dict, frozenset[str]]] = []
+    catalogs = online.get("catalogs", {}) if isinstance(online, dict) else {}
+    for entries in catalogs.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("installed"):
+                continue
+            name = entry.get("name")
+            if not name or name in local_names:
+                continue
+            # Tokenize name + description + tags. Tags are short, so they're
+            # high-signal noise-free overlap fuel (e.g., "pricing", "thumbnail").
+            tags = entry.get("tags") or []
+            text = " ".join([
+                name,
+                entry.get("description") or "",
+                " ".join(str(t) for t in tags if t),
+            ])
+            tokens = _tokenize(text)
+            if not tokens:
+                continue
+            index.append((entry, frozenset(tokens)))
+    return index
+
+
+def suggest_online_skill(prompt: str) -> Optional[dict]:
+    """Return the best-matching uninstalled online skill, or None.
+
+    Scoring is symmetric token-overlap with two gates:
+      1. At least `ONLINE_SUGGEST_MIN_OVERLAP` prompt tokens overlap with the
+         skill's tokenized text (raw count gate — kills tiny-prompt noise).
+      2. Confidence = |overlap| / min(|prompt|, |skill|) ≥
+         `ONLINE_SUGGEST_THRESHOLD`. Using min() instead of union (Jaccard)
+         lets a focused prompt match a verbose skill description, and vice
+         versa, without one drowning the other.
+
+    Adds `_router_confidence` to the returned dict so the caller can render
+    it in logs. Returns the entry verbatim otherwise — caller pulls `name`,
+    `source`, `install_command` from it.
+    """
+    prompt_tokens = _tokenize(prompt)
+    if len(prompt_tokens) < ONLINE_SUGGEST_MIN_OVERLAP:
+        return None
+    index = _online_skill_index()
+    if not index:
+        return None
+    best_entry: Optional[dict] = None
+    best_score = 0.0
+    best_overlap = 0
+    for entry, tokens in index:
+        overlap = prompt_tokens & tokens
+        count = len(overlap)
+        if count < ONLINE_SUGGEST_MIN_OVERLAP:
+            continue
+        denom = min(len(prompt_tokens), len(tokens))
+        if denom == 0:
+            continue
+        score = count / denom
+        if score > best_score:
+            best_score = score
+            best_overlap = count
+            best_entry = entry
+    if best_entry is None or best_score < ONLINE_SUGGEST_THRESHOLD:
+        return None
+    # Return a shallow copy so callers mutating the result can't poison cache.
+    result = dict(best_entry)
+    result["_router_confidence"] = round(best_score, 3)
+    result["_router_overlap"] = best_overlap
+    return result
+
+
+def render_online_suggestion(entry: dict) -> str:
+    """Render the soft suggestion announcement. Three lines, IRON-free."""
+    name = entry.get("name", "?")
+    source = entry.get("source", "online")
+    install_cmd = entry.get("install_command") or "(no install command provided)"
+    return "\n".join([
+        f"[skill-router] No installed skill matches, but `{name}` from {source} might fit.",
+        f"[skill-router] Install: {install_cmd}",
+        "[skill-router] (Skipped — soft suggestion only, no enforcement.)",
+    ])
+
+
 def main() -> int:
     prompt = os.environ.get("CLAUDE_USER_INPUT", "") or sys.stdin.read()
     prompt = prompt.strip()
@@ -837,8 +1159,16 @@ def main() -> int:
         log_chain(path, chain, domains)
         if hook_mode:
             write_pending(chain, path, domains)
-    elif os.environ.get("SKILL_ROUTER_DEBUG") == "1":
-        print(f"[skill-router] (silent — no clear route for prompt of {len(prompt)} chars)", file=sys.stderr)
+    else:
+        # Both regex triage and embedding fallback returned SKIP. Last-ditch
+        # path: check the online catalog for a novel uninstalled skill that
+        # token-matches the prompt. Soft suggestion only — no write_pending(),
+        # no IRON enforcement, since the skill can't actually be invoked.
+        suggestion = suggest_online_skill(prompt)
+        if suggestion is not None:
+            print(render_online_suggestion(suggestion))
+        elif os.environ.get("SKILL_ROUTER_DEBUG") == "1":
+            print(f"[skill-router] (silent — no clear route for prompt of {len(prompt)} chars)", file=sys.stderr)
     return 0
 
 

@@ -18,13 +18,13 @@
     ],
     "PreToolUse": [
       {
-        "_purpose": "IRON RULE — block state-changing tools (Bash, Edit, Write, Task, NotebookEdit, MultiEdit) when an announced skill has not yet been invoked. Read/Glob/Grep/TodoWrite/Skill remain allowed so the model can still gather context and dispatch.",
-        "matcher": "Bash|Edit|Write|Task|NotebookEdit|MultiEdit",
+        "_purpose": "IRON RULE — block source-mutating tools (Edit, Write, Task, NotebookEdit, MultiEdit) when an announced skill has not yet been invoked. Bash is intentionally excluded: most Bash is read-only (grep, ls, find) or one-shot shell work (yt-dlp, ffmpeg, gh) that has nothing to do with the announced planning skill, so blocking it punishes every misroute. Edit/Write/Task are the actual state-changers a planning skill needs to gate. Read/Glob/Grep/TodoWrite/Skill/Bash remain allowed so the model can gather context, run tools, and dispatch.",
+        "matcher": "Edit|Write|Task|NotebookEdit|MultiEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; expected=$(jq -r '.remaining[0]' \"$state\"); jq -n --arg s \"$expected\" '{hookSpecificOutput: {hookEventName: \"PreToolUse\", permissionDecision: \"deny\", permissionDecisionReason: (\"[skill-router] IRON RULE: your next tool call must be Skill(skill=\\\"\" + $s + \"\\\"). Other state-changing tools are blocked until that skill runs. Read/Glob/Grep/TodoWrite remain allowed. Override: include [no-router] in your next prompt.\")}}'",
-            "timeout": 3
+            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; expected=$(jq -r '.remaining[0]' \"$state\"); b=\"$HOME/.claude\"; skill_ok=0; [ -d \"$b/skills/$expected\" ] && skill_ok=1; [ -f \"$b/commands/${expected}.md\" ] && skill_ok=1; if [ \"$skill_ok\" = \"0\" ] && echo \"$expected\" | grep -q ':'; then p=$(echo \"$expected\" | cut -d: -f1); s=$(echo \"$expected\" | cut -d: -f2-); [ -n \"$(find \"$b/plugins/cache\" -path \"*/${p}/*/skills/${s}/SKILL.md\" 2>/dev/null | head -1)\" ] && skill_ok=1; fi; if [ \"$skill_ok\" = \"0\" ]; then echo '{}' > \"$state\"; exit 0; fi; jq -n --arg s \"$expected\" '{hookSpecificOutput: {hookEventName: \"PreToolUse\", permissionDecision: \"deny\", permissionDecisionReason: (\"[skill-router] IRON RULE: your next tool call must be Skill(skill=\\\"\" + $s + \"\\\"). Other state-changing tools are blocked until that skill runs. Read/Glob/Grep/TodoWrite remain allowed. Override: include [no-router] in your next prompt.\")}}'",
+            "timeout": 5
           }
         ]
       }
@@ -44,6 +44,12 @@
             "type": "command",
             "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; invoked=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); [ -z \"$invoked\" ] && exit 0; tmp=$(mktemp); if jq --arg s \"$invoked\" '.remaining = ((.remaining // []) - [$s])' \"$state\" > \"$tmp\" 2>/dev/null; then mv \"$tmp\" \"$state\"; else rm -f \"$tmp\"; fi",
             "timeout": 2
+          },
+          {
+            "_purpose": "Strike-reset on successful Skill invocation. Resets the consecutive-miss counter for the invoked skill — re-arms IRON enforcement next time it's announced. Pairs with clear_pending() which bumps strikes for unsatisfied announcements at turn start.",
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_strikes.json\"; [ ! -f \"$state\" ] && exit 0; invoked=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); [ -z \"$invoked\" ] && exit 0; tmp=$(mktemp); if jq --arg s \"$invoked\" 'del(.[$s])' \"$state\" > \"$tmp\" 2>/dev/null; then mv \"$tmp\" \"$state\"; else rm -f \"$tmp\"; fi",
+            "timeout": 2
           }
         ]
       }
@@ -54,8 +60,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; pending=$(jq -r '.remaining | join(\", \")' \"$state\"); jq -n --arg s \"$pending\" '{decision: \"block\", reason: (\"[skill-router] You announced a chain but never invoked: \" + $s + \". Invoke the skill now or include [no-router] in your next prompt to override enforcement.\")}'",
-            "timeout": 3
+            "command": "input=$(cat 2>/dev/null); stop_active=$(echo \"$input\" | jq -r '.stop_hook_active // false' 2>/dev/null); [ \"$stop_active\" = \"true\" ] && exit 0; state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; expected=$(jq -r '.remaining[0]' \"$state\" 2>/dev/null); if [ -n \"$expected\" ]; then b=\"$HOME/.claude\"; skill_ok=0; [ -d \"$b/skills/$expected\" ] && skill_ok=1; [ -f \"$b/commands/${expected}.md\" ] && skill_ok=1; if [ \"$skill_ok\" = \"0\" ] && echo \"$expected\" | grep -q ':'; then p=$(echo \"$expected\" | cut -d: -f1); s=$(echo \"$expected\" | cut -d: -f2-); [ -n \"$(find \"$b/plugins/cache\" -path \"*/${p}/*/skills/${s}/SKILL.md\" 2>/dev/null | head -1)\" ] && skill_ok=1; fi; if [ \"$skill_ok\" = \"0\" ]; then echo '{}' > \"$state\"; exit 0; fi; fi; pending=$(jq -r '.remaining | join(\", \")' \"$state\"); jq -n --arg s \"$pending\" '{decision: \"block\", reason: (\"[skill-router] You announced a chain but never invoked: \" + $s + \". Invoke the skill now or include [no-router] in your next prompt to override enforcement.\")}'",
+            "timeout": 5
           }
         ]
       }

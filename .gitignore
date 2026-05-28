@@ -12,3 +12,8 @@ marketing/
 .DS_Store
 __pycache__/
 .serena/
+
+# Local embedder daemon
+.venv/
+data/labeled_corpus.jsonl
+*.sock

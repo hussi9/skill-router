@@ -28,12 +28,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+# This sampler measures deterministic table routing over real prompts. The
+# live hook can enable embedding fallback separately during dogfood.
+os.environ.setdefault("SKILL_ROUTER_NO_EMBED", "1")
+
 import router  # type: ignore[import-not-found]
 
 
