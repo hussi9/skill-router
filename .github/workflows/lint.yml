@@ -1,0 +1,56 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate SKILL.md frontmatter
+        run: |
+          for f in SKILL.md SKILL.personal.md codex-skill/skill-router/SKILL.md; do
+            echo "Checking $f"
+            head -1 "$f" | grep -q '^---$' || { echo "::error file=$f::missing opening frontmatter ---"; exit 1; }
+            head -10 "$f" | grep -q '^name:' || { echo "::error file=$f::missing 'name:' in frontmatter"; exit 1; }
+            head -10 "$f" | grep -q '^description:' || { echo "::error file=$f::missing 'description:' in frontmatter"; exit 1; }
+          done
+
+      - name: Validate statusline runs without error
+        run: |
+          chmod +x statusline.sh
+          echo '{"model":{"display_name":"sonnet"},"workspace":{"current_dir":"/tmp"},"context_window":{"used_percentage":15},"cost":{"total_cost_usd":0.05,"total_duration_ms":120000,"turn_count":5}}' \
+            | bash statusline.sh > /dev/null
+
+      - name: Check no internal-planning docs at root
+        run: |
+          for f in IMPLEMENTATION_PLAN.md PRODUCT_POSITIONING.md ROUTING_CONTRACT.md CODEX_ADAPTATION_PLAN.md skill-router-core.md; do
+            if [ -f "$f" ]; then
+              echo "::error::$f is an internal planning doc and must live in .archive/, not the repo root"
+              exit 1
+            fi
+          done
+
+      - name: Check known-skill-repos has expected entries
+        run: |
+          for repo in anthropics/skills K-Dense-AI ComposioHQ sickn33 intellectronica; do
+            grep -q "$repo" references/known-skill-repos.md || { echo "::error::known-skill-repos.md missing $repo entry"; exit 1; }
+          done
+
+      - name: Check CHANGELOG has an Unreleased section
+        run: grep -q '^## Unreleased' CHANGELOG.md || { echo "::error::CHANGELOG.md missing '## Unreleased' header"; exit 1; }
+
+      - name: Check Claude + Codex flavors both have core sections
+        run: |
+          grep -q "DISPATCH PROTOCOL" SKILL.md || { echo "::error::SKILL.md missing DISPATCH PROTOCOL"; exit 1; }
+          grep -qi "named chain" SKILL.md || { echo "::error::SKILL.md missing Named Chain"; exit 1; }
+          grep -qiE "Named Chains|named-chain" codex-skill/skill-router/SKILL.md || { echo "::error::Codex flavor missing Named Chains"; exit 1; }
+          grep -qiE "Dispatch Protocol|per-step model" codex-skill/skill-router/SKILL.md || { echo "::error::Codex flavor missing Dispatch Protocol"; exit 1; }
+
+      - name: Run router unit tests
+        run: python3 -m unittest discover tests -v
+

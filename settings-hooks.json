@@ -1,0 +1,93 @@
+{
+  "_comment": "skill-router hooks. Three log files / state files are involved:",
+  "_log_skill_usage": "~/.claude/skill_usage.log — written by the Skill PostToolUse hook, one line per Skill tool fire (timestamp\\tskill-name). Used by the adaptive learning loop in scripts/learn-from-history.py.",
+  "_log_skill_router": "~/.claude/skill_router_log.jsonl — chain-start, chain-step, thinking-active, catalog-upgrade events. Written by scripts/router.py.",
+  "_state_pending": "~/.claude/skill_router_pending.json — IRON RULE pending state. Written by scripts/router.py when an announcement fires; cleared at the start of every UserPromptSubmit turn; updated by the Skill PostToolUse hook to remove invoked skills from .remaining. Read by the PreToolUse and Stop hooks.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "_purpose": "Run the deterministic router and inject the announcement as systemMessage / additionalContext. The router itself clears pending state at turn start and writes new pending state when an announcement fires.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "prompt=$(jq -r '.prompt // empty'); [ -z \"$prompt\" ] && exit 0; out=$(SKILL_ROUTER_HOOK_MODE=1 python3 ~/.claude/skills/skill-router/scripts/router.py <<< \"$prompt\" 2>/dev/null); [ -z \"$out\" ] && exit 0; jq -n --arg msg \"$out\" '{systemMessage: $msg, hookSpecificOutput: {hookEventName: \"UserPromptSubmit\", additionalContext: $msg}}'",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "_purpose": "IRON RULE — block source-mutating tools (Edit, Write, Task, NotebookEdit, MultiEdit) when an announced skill has not yet been invoked. Bash is intentionally excluded: most Bash is read-only (grep, ls, find) or one-shot shell work (yt-dlp, ffmpeg, gh) that has nothing to do with the announced planning skill, so blocking it punishes every misroute. Edit/Write/Task are the actual state-changers a planning skill needs to gate. Read/Glob/Grep/TodoWrite/Skill/Bash remain allowed so the model can gather context, run tools, and dispatch.",
+        "matcher": "Edit|Write|Task|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; expected=$(jq -r '.remaining[0]' \"$state\"); b=\"$HOME/.claude\"; skill_ok=0; [ -d \"$b/skills/$expected\" ] && skill_ok=1; [ -f \"$b/commands/${expected}.md\" ] && skill_ok=1; if [ \"$skill_ok\" = \"0\" ] && echo \"$expected\" | grep -q ':'; then p=$(echo \"$expected\" | cut -d: -f1); s=$(echo \"$expected\" | cut -d: -f2-); [ -n \"$(find \"$b/plugins/cache\" -path \"*/${p}/*/skills/${s}/SKILL.md\" 2>/dev/null | head -1)\" ] && skill_ok=1; fi; if [ \"$skill_ok\" = \"0\" ]; then echo '{}' > \"$state\"; exit 0; fi; jq -n --arg s \"$expected\" '{hookSpecificOutput: {hookEventName: \"PreToolUse\", permissionDecision: \"deny\", permissionDecisionReason: (\"[skill-router] IRON RULE: your next tool call must be Skill(skill=\\\"\" + $s + \"\\\"). Other state-changing tools are blocked until that skill runs. Read/Glob/Grep/TodoWrite/Bash remain allowed. Wrong call? Overrule it with a reason: python3 ~/.claude/skills/skill-router/scripts/router_override.py \\\"<reason>\\\" (or the user can type [no-router]).\")}}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "_purpose": "Log every Skill invocation (used by adaptive learning) AND remove the invoked skill from the IRON RULE pending state.",
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "_note": "Modern Claude Code passes hook input via stdin as JSON. Older versions used $CLAUDE_TOOL_INPUT env var. Read stdin for forward compatibility.",
+            "type": "command",
+            "command": "skill=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); if [ -n \"$skill\" ]; then printf '%s\\t%s\\n' \"$(date '+%Y-%m-%d %H:%M:%S')\" \"$skill\" >> ~/.claude/skill_usage.log; fi",
+            "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; invoked=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); [ -z \"$invoked\" ] && exit 0; tmp=$(mktemp); if jq --arg s \"$invoked\" '.remaining = ((.remaining // []) - [$s])' \"$state\" > \"$tmp\" 2>/dev/null; then mv \"$tmp\" \"$state\"; else rm -f \"$tmp\"; fi",
+            "timeout": 2
+          },
+          {
+            "_purpose": "Strike-reset on successful Skill invocation. Resets the consecutive-miss counter for the invoked skill — re-arms IRON enforcement next time it's announced. Pairs with clear_pending() which bumps strikes for unsatisfied announcements at turn start.",
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_strikes.json\"; [ ! -f \"$state\" ] && exit 0; invoked=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); [ -z \"$invoked\" ] && exit 0; tmp=$(mktemp); if jq --arg s \"$invoked\" 'del(.[$s])' \"$state\" > \"$tmp\" 2>/dev/null; then mv \"$tmp\" \"$state\"; else rm -f \"$tmp\"; fi",
+            "timeout": 2
+          },
+          {
+            "_purpose": "Override-reset on successful Skill invocation. Clears the reasoned-override tally for the invoked skill so a skill that was previously overruled recovers the moment it's actually used correctly. Mirrors the strike-reset; pairs with scripts/router_override.py which bumps the tally.",
+            "type": "command",
+            "command": "state=\"$HOME/.claude/skill_router_overrides_count.json\"; [ ! -f \"$state\" ] && exit 0; invoked=$(cat | jq -r '.tool_input.skill // empty' 2>/dev/null); [ -z \"$invoked\" ] && exit 0; tmp=$(mktemp); if jq --arg s \"$invoked\" 'del(.[$s])' \"$state\" > \"$tmp\" 2>/dev/null; then mv \"$tmp\" \"$state\"; else rm -f \"$tmp\"; fi",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "_purpose": "IRON RULE final gate — block turn end if pending skills were never invoked. Catches the case where the model reasoned its way out using only allowed tools (Read/Glob/Grep) and tried to finish without dispatching.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat 2>/dev/null); stop_active=$(echo \"$input\" | jq -r '.stop_hook_active // false' 2>/dev/null); [ \"$stop_active\" = \"true\" ] && exit 0; state=\"$HOME/.claude/skill_router_pending.json\"; [ ! -f \"$state\" ] && exit 0; remaining=$(jq -r '(.remaining // []) | length' \"$state\" 2>/dev/null); if [ -z \"$remaining\" ] || [ \"$remaining\" = \"0\" ]; then exit 0; fi; expected=$(jq -r '.remaining[0]' \"$state\" 2>/dev/null); if [ -n \"$expected\" ]; then b=\"$HOME/.claude\"; skill_ok=0; [ -d \"$b/skills/$expected\" ] && skill_ok=1; [ -f \"$b/commands/${expected}.md\" ] && skill_ok=1; if [ \"$skill_ok\" = \"0\" ] && echo \"$expected\" | grep -q ':'; then p=$(echo \"$expected\" | cut -d: -f1); s=$(echo \"$expected\" | cut -d: -f2-); [ -n \"$(find \"$b/plugins/cache\" -path \"*/${p}/*/skills/${s}/SKILL.md\" 2>/dev/null | head -1)\" ] && skill_ok=1; fi; if [ \"$skill_ok\" = \"0\" ]; then echo '{}' > \"$state\"; exit 0; fi; fi; pending=$(jq -r '.remaining | join(\", \")' \"$state\"); jq -n --arg s \"$pending\" '{decision: \"block\", reason: (\"[skill-router] You announced a chain but never invoked: \" + $s + \". Invoke the skill now, OR if it is the wrong call run python3 ~/.claude/skills/skill-router/scripts/router_override.py \\\"<reason>\\\" to record why and clear the rule (or the user can type [no-router]).\")}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "_purpose": "Backstop for plugin runtime deps. Claude Code drops new plugin versions into ~/.claude/plugins/cache/<owner>/<plugin>/<version>/ but never runs `bun install` against the bundled package.json, so workers (e.g. claude-mem worker-service.cjs) fail with 'Cannot find module zod/v3'. This hook runs scripts/ensure-plugin-deps.sh in the background — it's idempotent and skips dirs that already have node_modules, so cost is ~0 once steady-state.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/skills/skill-router/scripts/ensure-plugin-deps.sh >/dev/null 2>&1 &",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh",
+    "padding": 2
+  }
+}

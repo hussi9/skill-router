@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd-embedder.plist — keeps the local embedder daemon running.
+
+  The daemon loads the BAAI/bge-small-en-v1.5 ONNX model once and serves
+  classification requests over a Unix socket. Local-only: zero network.
+
+  SETUP (one-time, ~60 seconds):
+
+    1. Substitute paths (run from skill-router repo root):
+         REPO=$(pwd)
+         sed -e "s|{{SKILL_ROUTER_PATH}}|$REPO|g" \
+             -e "s|{{HOME}}|$HOME|g" \
+           setup/launchd-embedder.plist > /tmp/com.skill-router.embedder.plist
+
+    2. Copy to LaunchAgents:
+         cp /tmp/com.skill-router.embedder.plist \
+           ~/Library/LaunchAgents/com.skill-router.embedder.plist
+
+    3. Load it:
+         launchctl load \
+           ~/Library/LaunchAgents/com.skill-router.embedder.plist
+
+    4. Verify:
+         launchctl list | grep skill-router.embedder
+         tail -5 ~/.claude/skill_router_embedder.log
+
+  Output goes to: ~/.claude/skill_router_embedder.log
+  Errors go to:   ~/.claude/skill_router_embedder_err.log
+  Socket lives at: ~/.claude/skill_router_embedder.sock
+-->
+<plist version="1.0">
+<dict>
+
+    <key>Label</key>
+    <string>com.skill-router.embedder</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{SKILL_ROUTER_PATH}}/.venv/bin/python</string>
+        <string>{{SKILL_ROUTER_PATH}}/scripts/embedder_daemon.py</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>{{HOME}}/.claude/skill_router_embedder.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{HOME}}/.claude/skill_router_embedder_err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+</dict>
+</plist>
