@@ -60,7 +60,13 @@ ONLINE_SUGGEST_MIN_OVERLAP = 3
 # mode: silently dropped from future announcements until a successful invoke
 # resets its counter. Self-tuning — bad routes auto-demote, good ones recover
 # the moment they're actually used.
-STRIKE_THRESHOLD = 2
+# Four, not two. A silent miss is weak evidence: the announcement may have
+# been right and the user changed topic, or interrupted, or the turn ended in a
+# question. Two of those in a row was enough to silence a skill for over a
+# week — a test loop that ran the hook three times without invoking anything
+# demoted `systematic-debugging` and `youtube-manager` outright. Demotion must
+# require a pattern, not a coincidence.
+STRIKE_THRESHOLD = 4
 # Deferral half-life. Both strike-based and override-based demotions expire
 # after this many days.
 #
@@ -72,7 +78,12 @@ STRIKE_THRESHOLD = 2
 # requesting-code-review and frontend-design, which is to say the entire BROKEN
 # path and most of BUILD. The router looked healthy and answered SKIP to
 # everything. A demotion must be a cooldown, never a tombstone.
-DEFER_TTL_DAYS = 10
+# Two TTLs, because the two signals differ in strength. A reasoned override is
+# the model stating, with a recorded reason, that the route was wrong; that
+# deserves to be remembered for a while. A silent miss is ambiguous and should
+# be forgotten quickly.
+DEFER_TTL_DAYS = 10       # reasoned overrides
+STRIKE_TTL_DAYS = 3       # silent misses
 # A reasoned override is a STRONGER signal than a silent miss — the model
 # explicitly said the route was wrong and stated why. But override counts are
 # keyed per-skill (not per-prompt), so we still require a small pattern before
@@ -678,7 +689,7 @@ def _now_epoch() -> float:
     return time.time()
 
 
-def _decay_counts(raw: dict) -> dict[str, int]:
+def _decay_counts(raw: dict, ttl_days: float = DEFER_TTL_DAYS) -> dict[str, int]:
     """Normalize a demotion tally, dropping entries older than DEFER_TTL_DAYS.
 
     Two on-disk shapes are accepted:
@@ -690,7 +701,7 @@ def _decay_counts(raw: dict) -> dict[str, int]:
     were the permanent tombstones this TTL exists to end, and honoring them
     would carry the bug forward across the upgrade.
     """
-    cutoff = _now_epoch() - DEFER_TTL_DAYS * 86400
+    cutoff = _now_epoch() - ttl_days * 86400
     out: dict[str, int] = {}
     for skill, val in (raw or {}).items():
         if isinstance(val, dict):
@@ -704,7 +715,7 @@ def _decay_counts(raw: dict) -> dict[str, int]:
     return out
 
 
-def _bump_count(path: Path, skill: str) -> None:
+def _bump_count(path: Path, skill: str, ttl_days: float = DEFER_TTL_DAYS) -> None:
     """Increment a demotion tally for `skill`, stamped with the current time."""
     if not skill:
         return
@@ -716,7 +727,7 @@ def _bump_count(path: Path, skill: str) -> None:
                 raw = loaded
         except (json.JSONDecodeError, OSError):
             raw = {}
-    live = _decay_counts(raw)
+    live = _decay_counts(raw, ttl_days)
     live[skill] = live.get(skill, 0) + 1
     payload = {s: {"n": n, "ts": _now_epoch()} for s, n in live.items()}
     try:
@@ -751,14 +762,14 @@ def _load_strikes() -> dict[str, int]:
         data = json.loads(STRIKES.read_text() or "{}")
     except (json.JSONDecodeError, OSError):
         return {}
-    return _decay_counts(data if isinstance(data, dict) else {})
+    return _decay_counts(data if isinstance(data, dict) else {}, STRIKE_TTL_DAYS)
 
 
 def _bump_strikes(skills: list[str]) -> None:
     """Add one strike to each skill announced but never invoked this turn."""
     for s in skills:
         if isinstance(s, str) and s:
-            _bump_count(STRIKES, s)
+            _bump_count(STRIKES, s, STRIKE_TTL_DAYS)
 
 
 def reset_strikes(skill: str) -> None:

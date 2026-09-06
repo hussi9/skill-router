@@ -1021,6 +1021,21 @@ class TestDeferralDecays(unittest.TestCase):
             router._bump_override_count("refactor")
         self.assertTrue(router.is_deferred("refactor"))
 
+    def test_silent_misses_expire_faster_than_reasoned_overrides(self) -> None:
+        """The two signals differ in strength, so they differ in memory.
+
+        A reasoned override is the model stating with a recorded reason that
+        the route was wrong. A silent miss may just mean the user changed
+        topic. Sharing one TTL let three throwaway hook runs demote a core
+        skill for over a week.
+        """
+        self.assertLess(router.STRIKE_TTL_DAYS, router.DEFER_TTL_DAYS)
+        self.assertGreater(router.STRIKE_THRESHOLD, 2,
+            "two silent misses is a coincidence, not a pattern")
+        aging = time.time() - (router.STRIKE_TTL_DAYS + 1) * 86400
+        router.STRIKES.write_text(json.dumps({"refactor": {"n": 99, "ts": aging}}))
+        self.assertFalse(router.is_deferred("refactor"))
+
     def test_expired_overrides_release(self) -> None:
         stale = time.time() - (router.DEFER_TTL_DAYS + 1) * 86400
         router.OVERRIDES_COUNT.write_text(json.dumps(
