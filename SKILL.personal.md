@@ -1,144 +1,175 @@
 ---
 name: skill-router-personal
-description: Personal routing overrides. Layers on top of skill-router-core. Copy this file to ~/.claude/skills/skill-router/SKILL.personal.md and customize.
+description: Personal routing overrides for this machine. Project routes are parsed by scripts/router.py and win over the universal routing table.
 ---
 
-# Skill Router — Personal Overrides Template
+# Skill Router — Personal Overrides
 
-**How this works:**
-- The universal core (SKILL.md) runs first and handles 90% of tasks
-- This file adds project-specific routing that overrides or extends the core
-- Your rules always win over the core rules (CSS cascade model)
+Two layers live here, and they behave differently:
+
+| Layer | Read by | Enforced? |
+|---|---|---|
+| `routes:` (below) | `scripts/router.py` at hook time | Yes — becomes the announced step |
+| `chains:` (below) | You, when you read this file | No — guidance for multi-step work |
+
+The universal core (`SKILL.md`) handles generic work: is this broken, new, or
+maintenance. It cannot know that "ship the next one" means a YouTube short and
+"submit the build" means Scrollbook. That is what `routes:` is for — the one
+signal the router can be certain about is a name that only ever means one
+project.
 
 ---
 
-## HOW TO USE
+## PROJECT ROUTES — parsed, deterministic, first match wins
 
-1. Copy to `~/.claude/skills/skill-router/SKILL.personal.md`
-2. Replace the example sections below with your own projects
-3. Add rows to the routing tables for signals specific to your work
-4. The core SKILL.md loads first — only add things the core doesn't cover
+Every trigger is a case-insensitive substring of the prompt and must be at
+least 4 characters (shorter ones collide with ordinary English). A route whose
+skill is not installed is skipped with a warning rather than announced, so
+uninstalling a skill degrades gracefully instead of deadlocking the IRON RULE.
+
+Order is priority order. Put the narrow triggers above the broad ones.
+
+```yaml
+routes:
+  - name: youtube-pipeline
+    when: ["@economicalai", "economicalai", "youtube short", "hook-forge", "yt-showrunner", "youtube video", "retention edit"]
+    skill: youtube-manager
+    agent: general-purpose
+    path: OPERATE
+    thinking: think
+
+  - name: youtube-thumbnail
+    when: ["thumbnail"]
+    skill: youtube-thumbnail
+    path: BUILD
+
+  - name: scrollbook-ship
+    when: ["testflight", "app store connect", "capgo", "play store", "scrollbook deploy", "scrollbook release"]
+    skill: scrollbook-deploy
+    path: OPERATE
+    thinking: think
+
+  - name: scrollbook-qa
+    when: ["scrollbook qa", "scrollbook test"]
+    skill: scrollbook-qa
+    path: OPERATE
+
+  - name: scrollbook-authoring
+    when: ["scrollbook chapter", "scrollbook book", "story pool", "briefing"]
+    skill: claude-author
+    path: BUILD
+    thinking: think
+
+  - name: jobhunt
+    when: ["jobhunt", "applypilot", "tailored resume", "job pipeline"]
+    skill: jobhunt-agent
+    path: OPERATE
+
+  - name: lead-gen
+    when: ["wseller", "cosmetic dentist", "lead gen", "outreach draft", "prospect list"]
+    skill: wseller
+    path: OPERATE
+    thinking: think
+
+  - name: mac-health
+    when: ["kernel panic", "mac keeps restarting", "free disk space", "macbook slow", "startup items"]
+    skill: mac-doctor
+    path: BROKEN
+    thinking: think
+
+  - name: media-generation
+    when: ["higgsfield", "kling", "b-roll", "broll", "image-to-video"]
+    skill: higgsfield
+    path: BUILD
+
+  - name: seo-work
+    when: ["seo audit", "core web vitals", "schema markup", "serp", "backlink"]
+    skill: seo
+    path: OPERATE
+    thinking: think
+
+  - name: paid-ads
+    when: ["google ads", "meta ads", "ad account", "campaign budget", "ad creative"]
+    skill: ads
+    path: OPERATE
+    thinking: think
+
+  - name: marketing
+    when: ["landing page copy", "cold email", "positioning", "go-to-market", "growth loop"]
+    skill: market
+    path: BUILD
+    thinking: think
+
+  - name: skill-system
+    when: ["skill-router", "skill router", "routing table", "write a skill", "skill catalog"]
+    skill: superpowers:writing-skills
+    path: BUILD
+    thinking: think
+```
+
+**Adding a route:** name it, give it triggers only that project would ever
+produce, point it at an installed skill. Then prove it fires:
+
+```bash
+python3 ~/.claude/skills/skill-router/scripts/router.py <<< "your test prompt"
+```
+
+**When NOT to add one:** the generic table already lands it, or the trigger is
+a word you use across projects. A route that fires on the wrong project is
+worse than no route — you will start ignoring the announcement.
 
 ---
 
-## NAMED CHAINS — Save Your Preferred Sequences
+## EXECUTION GUARDRAILS — this machine
 
-The router checks this block *before* computing a fresh chain from the routing
-table. If a `when:` signal matches your task, the saved chain wins.
+```
+Autonomous mode is the default (see ~/.claude/CLAUDE.md). Interactive
+gate skills — superpowers:brainstorming above all — will usually be the
+wrong call, because they stop and ask. Record the design in
+docs/superpowers/specs and keep going instead. If the router announces
+brainstorming on a directive you have already fully specified, overrule it
+with a reason rather than sitting through the gate:
+  scripts/router_override.py "user gave full spec; autonomous mode"
 
-**Schema:**
+Supabase schema touched?   → regenerate types before calling it done
+iOS / Capacitor change?    → verify on the simulator, not the diff
+Payment or auth flow?      → security-auditor before merge
+UI/UX task?                → the CLAUDE.md contract rule applies: appearance
+                             only, every control still present afterwards
+Private repo?              → no GitHub Actions; local scripts/check.sh only
+Deleting anything?         → move to .archive/, never rm
+```
+
+---
+
+## COMPLETION GATES — extended
+
+```
+DATABASE:  migration applied · types regenerated · RLS reviewed
+MOBILE:    simulator screenshot · both platforms where the app has both
+CONTENT:   vision audit passed before any upload
+DEPLOY:    tests green locally · verification-before-completion invoked
+```
+
+---
+
+## NAMED CHAINS — read by you, not by the parser
+
+These are sequences worth remembering. They are documentation: the router does
+not execute them. Schema and rationale: [`references/named-chains.md`](./references/named-chains.md).
 
 ```yaml
 chains:
   - name: ship-feature
-    when:
-      - "ship the feature"
-      - "lets implement"
-      - "start the implementation"
-    chain: writing-plans → dispatching-parallel-agents → frontend-design + db-expert
+    when: ["ship the feature", "start the implementation"]
+    chain: superpowers:writing-plans → superpowers:test-driven-development → superpowers:verification-before-completion
 
   - name: production-incident
-    when:
-      - "500 errors in prod"
-      - "production is down"
-      - "users can't log in"
+    when: ["production is down", "users can't log in"]
     chain: superpowers:systematic-debugging → security
-    model: opus
+    thinking: ultrathink
 
-  - name: weekly-cleanup
-    when:
-      - "weekly cleanup"
-      - "tidy up the repo"
-    chain: refactor → docs → superpowers:requesting-code-review
-```
-
-**Operators:** `→` sequential (B depends on A), `+` parallel (no shared state).
-
-**Match rules:** any `when:` line is a substring match (case-insensitive)
-against the user's prompt. First match wins. If no match, the router falls
-through to the regular routing table.
-
-**When to add a chain:**
-- You've typed the same multi-step request 3+ times
-- You have a recurring workflow with a specific skill order that beats the default
-- A project has a non-obvious sequence (e.g. always run `db-expert` *before* `frontend-design` because schema drives types)
-
-**When NOT to add a chain:**
-- The default routing already nails it — adding a duplicate just adds maintenance
-- The chain only applies once — the table handles one-offs fine
-
-Full design + examples: see [`references/named-chains.md`](./references/named-chains.md).
-
----
-
-## PERSONAL OVERRIDES — Add Your Projects Here
-
-### [Your Project Name]
-
-| Signal | Skill | Agent | Model |
-|--------|-------|-------|-------|
-| Replace with your signal | replace-with-skill | general-purpose | sonnet |
-
-### Multi-Platform Rule (if you work across web + mobile)
-
-```
-ANY feature touching [your app]:
-  → BOTH platforms must be implemented before "done"
-  → Web (apps/web) + Mobile (apps/mobile)
-```
-
----
-
-## EXECUTION GUARDRAILS — Add Your Own
-
-```
-[Add rules that apply automatically to your specific stack]
-
-Example:
-  Supabase touched?   → run supabase gen types after schema changes
-  iOS feature?        → test on simulator before "done"
-  Payment flow?       → security-auditor review before merge
-```
-
----
-
-## COMPLETION GATES — Extended
-
-```
-[Add domain-specific gates for your stack]
-
-Example:
-  DATABASE:
-    □ Migration written and applied
-    □ Types regenerated
-
-  MOBILE:
-    □ Web done
-    □ Mobile done
-    □ Both tested
-```
-
----
-
-## EXAMPLE — What A Real Personal Override Looks Like
-
-```markdown
-### MyApp — Backend (Node/Postgres)
-
-| Signal | Skill | Agent | Model |
-|--------|-------|-------|-------|
-| gRPC service change | system-design → test | integration-specialist | sonnet |
-| Rate limiting / quota | system-design → app-security | security-auditor | sonnet |
-| Board metrics review | board-review | general-purpose | opus |
-
-### Guardrails
-  Prisma schema touched?    → run prisma generate after changes
-  Redis touched?            → check TTL logic before merge
-  >10 DB queries in a file? → db-expert review
-
-### Completion Gates
-  BACKEND:
-    □ Migration file written (never raw ALTER)
-    □ Prisma types regenerated
-    □ Integration tests pass
+  - name: design-pass
+    when: ["design pass", "make it look right"]
+    chain: frontend-design:frontend-design → design-review → ui-review
 ```

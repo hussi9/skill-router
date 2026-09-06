@@ -31,6 +31,16 @@ from typing import Optional
 LOG = Path.home() / ".claude" / "skill_router_log.jsonl"
 PENDING = Path.home() / ".claude" / "skill_router_pending.json"
 STRIKES = Path.home() / ".claude" / "skill_router_strikes.json"
+# Reasoned-override state — the ask+learn loop. When the model judges a route
+# wrong, it records *why* via scripts/router_override.py instead of silently
+# fighting the IRON RULE (or the user having to type [no-router]). Two files:
+#   OVERRIDES_LOG   — append-only audit trail, one JSON line per override, so
+#                     scripts/weekly-analysis.sh can surface why routes get
+#                     rejected, not just that they do.
+#   OVERRIDES_COUNT — per-skill reasoned-override tally, consumed by
+#                     is_overridden() to defer a skill the model keeps correcting.
+OVERRIDES_LOG = Path.home() / ".claude" / "skill_router_overrides.jsonl"
+OVERRIDES_COUNT = Path.home() / ".claude" / "skill_router_overrides_count.json"
 # Local + online catalog snapshots. Local lists installed skills; online lists
 # uninstallable-but-discoverable skills (antigravity, anthropic marketplace,
 # etc.). The online catalog powers the "you don't have this but it'd fit"
@@ -51,10 +61,34 @@ ONLINE_SUGGEST_MIN_OVERLAP = 3
 # resets its counter. Self-tuning — bad routes auto-demote, good ones recover
 # the moment they're actually used.
 STRIKE_THRESHOLD = 2
+# Deferral half-life. Both strike-based and override-based demotions expire
+# after this many days.
+#
+# Why this exists: deferral used to be permanent. Two reasoned overrides ever
+# — even overrides recorded for a reason that has since stopped applying, like
+# "the user is running autonomously today so an interactive planning skill is
+# wrong" — silently removed a skill from routing forever. On this machine that
+# had quietly killed systematic-debugging, writing-plans, brainstorming,
+# requesting-code-review and frontend-design, which is to say the entire BROKEN
+# path and most of BUILD. The router looked healthy and answered SKIP to
+# everything. A demotion must be a cooldown, never a tombstone.
+DEFER_TTL_DAYS = 10
+# A reasoned override is a STRONGER signal than a silent miss — the model
+# explicitly said the route was wrong and stated why. But override counts are
+# keyed per-skill (not per-prompt), so we still require a small pattern before
+# deferring a generally-useful skill from one or two corrections. At
+# OVERRIDE_THRESHOLD reasoned overrides a skill drops to SOFT mode until a
+# successful invoke re-arms it. Coarse by design; the reasons in OVERRIDES_LOG
+# let the weekly analysis (or a human) make finer calls.
+OVERRIDE_THRESHOLD = 2
 SKILLS_DIR = Path.home() / ".claude" / "skills"
 PLUGINS_DIR = Path.home() / ".claude" / "plugins" / "cache"
-# Commands and agents both surface as valid `Skill(skill="<name>")` targets
-# from the model's perspective, so the catalog scan must include them.
+# Slash-commands DO surface as valid `Skill(skill="<name>")` targets.
+# Sub-agents do NOT — they are dispatched with the Agent tool, and
+# `Skill(skill="db-expert")` fails. Treating the agents directory as part of
+# the skill catalog is what let the failing-test route announce the
+# uninvokable `test-runner`, so the agent scan lives in a separate function
+# and never feeds valid_skill().
 COMMANDS_DIR = Path.home() / ".claude" / "commands"
 AGENTS_DIR = Path.home() / ".claude" / "agents"
 
@@ -63,6 +97,16 @@ AGENTS_DIR = Path.home() / ".claude" / "agents"
 # state, so all hooks pass through. Use when the user explicitly wants to
 # work outside the routed skill (e.g., to override a wrong route).
 ESCAPE_MARKERS = ("[no-router]", "[skip-router]", "[router-off]")
+
+# An explicit slash-command invocation: the user already chose the skill, so the
+# router must stand down — no classification, no embedder rescue, no IRON rule.
+# Matches one leading command segment terminated by whitespace or end of string:
+# "/gstack", "/ship prod", "/feature-dev:feature-dev". Deliberately does NOT
+# match a filesystem path like "/Users/airbook/x.py" — there the segment is
+# followed by "/", not whitespace/end, so the prompt routes normally. Hijacking
+# an explicit command into a *different* skill was the original "router fights
+# the user" bug.
+EXPLICIT_INVOCATION_RE = re.compile(r"^\s*/[A-Za-z][\w-]*(?::[\w-]+)*(?:\s|$)")
 
 # ---- Triage signals ---------------------------------------------------------
 
@@ -211,22 +255,41 @@ DOMAINS: dict[str, list[re.Pattern[str]]] = {
 
 @dataclass
 class Step:
+    """One routed step: which skill, which agent runs it, at what model and depth.
+
+    `model` is one of:
+
+      inherit  run in the parent session at whatever model the user chose.
+               The default, and correct for nearly every step.
+      haiku    dispatch to a sub-agent on the cheap model. Only for bulk
+               read-only work (repo scans, log greps) where the answer is a
+               list of file paths, not a judgment.
+
+    The table used to name `sonnet` on almost every row and `opus` on the hard
+    ones. That was written when the parent was always Sonnet, so 'sonnet'
+    silently meant 'inherit'. It stopped meaning that: this session runs Fable,
+    and the dispatch protocol reads "step model != parent model" as "fan out to
+    a sub-agent", so every routed step would have been shipped to a *weaker*
+    model than the one the user is paying for. Depth is now expressed through
+    `thinking`, which composes with any model, instead of through a model name
+    that only held for one family.
+    """
     skill: str
     agent: str = "general-purpose"
-    model: str = "sonnet"
+    model: str = "inherit"
     thinking: str = "none"
 
 
 DOMAIN_SKILL: dict[str, Step] = {
-    "UI/Frontend":   Step("frontend-design:frontend-design", "feature-dev:code-architect", "sonnet", "none"),
-    "DB schema":     Step("superpowers:writing-plans", "db-expert", "sonnet", "think"),
-    "API/Backend":   Step("feature-dev:feature-dev", "feature-dev:code-architect", "sonnet", "think"),
-    "Edge function": Step("vercel:vercel-functions", "integration-specialist", "sonnet", "none"),
-    "Auth":          Step("security", "security-auditor", "opus", "ultrathink"),
-    "Mobile":        Step("frontend-design:frontend-design", "feature-dev:code-architect", "sonnet", "none"),
-    "Data/AI":       Step("superpowers:brainstorming", "feature-dev:code-architect", "sonnet", "think-hard"),
-    "3rd-party":     Step("connect-apps", "integration-specialist", "sonnet", "none"),
-    "DevOps":        Step("superpowers:writing-plans", "general-purpose", "sonnet", "think"),
+    "UI/Frontend":   Step("frontend-design:frontend-design", "feature-dev:code-architect", "inherit", "none"),
+    "DB schema":     Step("supabase:supabase", "db-expert", "inherit", "think"),
+    "API/Backend":   Step("feature-dev:feature-dev", "feature-dev:code-architect", "inherit", "think"),
+    "Edge function": Step("vercel:vercel-functions", "integration-specialist", "inherit", "none"),
+    "Auth":          Step("security", "security-auditor", "inherit", "ultrathink"),
+    "Mobile":        Step("frontend-design:frontend-design", "feature-dev:code-architect", "inherit", "none"),
+    "Data/AI":       Step("superpowers:writing-plans", "feature-dev:code-architect", "inherit", "think-hard"),
+    "3rd-party":     Step("connect-apps", "integration-specialist", "inherit", "none"),
+    "DevOps":        Step("superpowers:writing-plans", "general-purpose", "inherit", "think"),
 }
 
 # 3rd-party catalog upgrade — all named services route to connect-apps (the
@@ -352,28 +415,30 @@ _MERGE_SHIP_RE = re.compile(r"\bmerge\b|\bship\b", re.IGNORECASE)
 
 def build_broken_chain(text: str) -> list[Step]:
     if production_incident(text):
-        return [Step("superpowers:systematic-debugging", "general-purpose", "opus", "ultrathink")]
+        return [Step("superpowers:systematic-debugging", "general-purpose", "inherit", "ultrathink")]
     if _TESTS_FAILING_RE.search(text):
-        return [Step("test-runner", "test-runner", "sonnet", "none"),
-                Step("superpowers:systematic-debugging", "general-purpose", "sonnet", "think")]
-    # typescript-expert is not installed; fall through to systematic-debugging
-    return [Step("superpowers:systematic-debugging", "general-purpose", "sonnet", "think")]
+        # One step, not two. The old first step announced Skill(skill="test-runner"),
+        # but test-runner is a sub-agent, not a skill — the call fails and the IRON
+        # RULE then blocks every edit waiting for a skill that cannot be invoked.
+        # The agent is where test-runner belongs.
+        return [Step("superpowers:systematic-debugging", "test-runner", "inherit", "think")]
+    return [Step("superpowers:systematic-debugging", "general-purpose", "inherit", "think")]
 
 
 def build_build_chain(text: str, domains: list[str]) -> list[Step]:
     if has_ambiguity(text):
-        return [Step("superpowers:brainstorming", "general-purpose", "sonnet", "none")]
+        return [Step("superpowers:brainstorming", "general-purpose", "inherit", "none")]
     if _NEW_SKILL_RE.search(text):
-        return [Step("superpowers:writing-skills", "general-purpose", "sonnet", "think")]
+        return [Step("superpowers:writing-skills", "general-purpose", "inherit", "think")]
     if not domains:
-        return [Step("superpowers:writing-plans", "feature-dev:code-architect", "sonnet", "think")]
+        return [Step("superpowers:writing-plans", "feature-dev:code-architect", "inherit", "think")]
     if len(domains) == 1:
         s = DOMAIN_SKILL[domains[0]]
         if domains[0] == "3rd-party":
-            s = Step(catalog_upgrade(text, s.skill), "integration-specialist", "sonnet", "none")
+            s = Step(catalog_upgrade(text, s.skill), "integration-specialist", "inherit", "none")
         return [s]
     # Multi-domain build → writing-plans + parallel domain skills
-    chain: list[Step] = [Step("superpowers:writing-plans", "general-purpose", "sonnet", "none")]
+    chain: list[Step] = [Step("superpowers:writing-plans", "general-purpose", "inherit", "none")]
     parallel = [DOMAIN_SKILL[d] for d in domains]
     parallel = [Step(catalog_upgrade(text, s.skill), s.agent, s.model, s.thinking)
                 if s.skill == "integration-specialist" else s for s in parallel]
@@ -383,18 +448,18 @@ def build_build_chain(text: str, domains: list[str]) -> list[Step]:
 
 def build_operate_chain(text: str) -> list[Step]:
     if _REFACTOR_RE.search(text):
-        return [Step("refactor", "code-simplifier:code-simplifier", "sonnet", "none")]
+        return [Step("refactor", "code-simplifier:code-simplifier", "inherit", "none")]
     if _ADD_TESTS_RE.search(text):
-        return [Step("superpowers:test-driven-development", "test-runner", "sonnet", "none")]
+        return [Step("superpowers:test-driven-development", "test-runner", "inherit", "none")]
     if _DEPLOY_RE.search(text):
-        return [Step("superpowers:verification-before-completion", "general-purpose", "sonnet", "none"),
-                Step("vercel:deploy", "general-purpose", "sonnet", "none")]
+        return [Step("superpowers:verification-before-completion", "general-purpose", "inherit", "none"),
+                Step("vercel:deploy", "general-purpose", "inherit", "none")]
     if _REVIEW_RE.search(text):
-        return [Step("superpowers:requesting-code-review", "superpowers:code-reviewer", "sonnet", "think-hard")]
+        return [Step("superpowers:requesting-code-review", "code-reviewer", "inherit", "think-hard")]
     if _MERGE_SHIP_RE.search(text):
-        return [Step("superpowers:finishing-a-development-branch", "general-purpose", "sonnet", "none")]
+        return [Step("superpowers:finishing-a-development-branch", "general-purpose", "inherit", "none")]
     # OPERATE_RE matched but no specific subpath — fall back to refactor.
-    return [Step("refactor", "code-simplifier:code-simplifier", "sonnet", "none")]
+    return [Step("refactor", "code-simplifier:code-simplifier", "inherit", "none")]
 
 
 # ---- Render announcement ----------------------------------------------------
@@ -418,18 +483,53 @@ def iron_rule_block(chain: list[Step]) -> list[str]:
     if not chain:
         return []
     primary = chain[0].skill
+    # Four lines, not nine. This block is injected on every routed turn, so
+    # every line is a permanent tax on the context window — and the long
+    # version spent five of them re-explaining an escape hatch the model
+    # needs perhaps once a week. State the rule, name the call, name the way
+    # out, stop.
     return [
         "",
-        "[skill-router] IRON RULE — your next tool call MUST be:",
-        f"[skill-router]   Skill(skill=\"{primary}\")",
-        "[skill-router] Other state-changing tools (Bash, Edit, Write, Task) are blocked",
-        "[skill-router] until this skill runs. Read/Glob/Grep/TodoWrite stay allowed.",
-        "[skill-router] Override: the USER must type [no-router] in their next message.",
-        "[skill-router]   Writing [no-router] in your own response does NOT clear pending.",
+        f"[skill-router] IRON RULE: call Skill(skill=\"{primary}\") before any "
+        f"Edit/Write/Task.",
+        "[skill-router] Read/Glob/Grep/Bash/TodoWrite/Skill stay allowed.",
+        "[skill-router] Wrong call? scripts/router_override.py \"<reason>\" clears it "
+        "and teaches the router.",
     ]
 
 
-def render(path: str, chain: list[Step], domains: list[str]) -> str:
+def _model_label(model: str) -> str:
+    """How a step's model reads in the announcement.
+
+    `inherit` is not a model name the user picked, so printing it verbatim
+    invites the reader to wonder which model that is. Say what actually
+    happens instead: the step runs in this session, at this session's model.
+    """
+    return "in-session" if model == "inherit" else model
+
+
+def _dispatch_label(step: Step, parallel: bool = False) -> str:
+    """The trailing `(...)` on a ▶ line: the dispatch decision, made once here
+    so the announcement and the protocol can never disagree."""
+    if parallel:
+        # Parallel steps always go through Agent — not for the model, but
+        # because they need independent contexts to run at the same time.
+        return f"{step.model}, parallel via Agent"
+    if step.model == "inherit":
+        return "inherit, in-session"
+    return f"{step.model}, via Agent"
+
+
+def _models_line(chain: list[Step]) -> str:
+    """The `Models:` value. Collapses to one phrase when nothing is overridden,
+    because 'in-session · in-session · in-session' says the same thing three
+    times and reads like a bug."""
+    if all(s.model == "inherit" for s in chain):
+        return "inherit (this session)"
+    return " · ".join(_model_label(s.model) for s in chain)
+
+
+def render(path: str, chain: list[Step], domains: list[str], note: str = "") -> str:
     """Render the [skill-router] announcement. Empty string if SKIP.
 
     The closing `▶` marker(s) tell the model which skill(s) to invoke.
@@ -448,11 +548,12 @@ def render(path: str, chain: list[Step], domains: list[str]) -> str:
     out: list[str] = []
 
     if is_multi:
+        if note:
+            out.append(f"[skill-router] Using your {note}.")
         out.append(f"[skill-router] This touches {len(domains)} domains: {', '.join(domains)}.")
         chain_display = f"{chain[0].skill} → {' + '.join(s.skill for s in chain[1:])}"
         out.append(f"[skill-router] Chain: {chain_display}")
-        parallel_models = "+".join(s.model for s in chain[1:])
-        models_display = f"{chain[0].model} · {parallel_models}"
+        models_display = _models_line(chain)
         thinking = max_thinking(chain)
         if thinking != "none":
             out.append(f"[skill-router] Models: {models_display}  ·  Thinking: {thinking}")
@@ -460,29 +561,33 @@ def render(path: str, chain: list[Step], domains: list[str]) -> str:
             out.append(f"[skill-router] Models: {models_display}")
         out.append(f"[skill-router] Invoke step 1/2 now:")
         out.append("")
-        out.append(f"▶ {chain[0].skill}  ({chain[0].model}, in-session)")
+        out.append(f"▶ {chain[0].skill}  ({_dispatch_label(chain[0])})")
         domain_skills = " + ".join(s.skill for s in chain[1:])
-        out.append(f"▶ {domain_skills}  ({chain[1].model}, parallel via Agent)")
+        out.append(f"▶ {domain_skills}  ({_dispatch_label(chain[1], parallel=True)})")
         out.extend(iron_rule_block(chain))
         return "\n".join(out)
 
     if n == 1:
         s = chain[0]
+        if note:
+            out.append(f"[skill-router] Using your {note}.")
         out.append(f"[skill-router] This is a {path} task → {s.skill} → {s.agent}.")
         if s.thinking != "none":
-            out.append(f"[skill-router] Model: {s.model}  ·  Thinking: {s.thinking}")
+            out.append(f"[skill-router] Model: {_model_label(s.model)}  ·  Thinking: {s.thinking}")
         else:
-            out.append(f"[skill-router] Model: {s.model}")
+            out.append(f"[skill-router] Model: {_model_label(s.model)}")
         out.append(f"[skill-router] Invoke now:")
         out.append("")
-        out.append(f"▶ {s.skill}  ({s.model}, in-session)")
+        out.append(f"▶ {s.skill}  ({_dispatch_label(s)})")
         out.extend(iron_rule_block(chain))
         return "\n".join(out)
 
     # Sequential N-step (e.g. test-runner → systematic-debugging, verify → deploy)
+    if note:
+        out.append(f"[skill-router] Using your {note}.")
     out.append(f"[skill-router] This is a {path} task — {n}-step chain.")
     out.append("[skill-router] Chain: " + " → ".join(s.skill for s in chain))
-    models_display = " · ".join(s.model for s in chain)
+    models_display = _models_line(chain)
     thinking = max_thinking(chain)
     if thinking != "none":
         out.append(f"[skill-router] Models: {models_display}  ·  Thinking: {thinking}")
@@ -491,7 +596,7 @@ def render(path: str, chain: list[Step], domains: list[str]) -> str:
     out.append(f"[skill-router] Invoke step 1/{n} now:")
     out.append("")
     for s in chain:
-        out.append(f"▶ {s.skill}  ({s.model}, in-session)")
+        out.append(f"▶ {s.skill}  ({_dispatch_label(s)})")
     out.extend(iron_rule_block(chain))
     return "\n".join(out)
 
@@ -502,6 +607,15 @@ def escape_active(prompt: str) -> bool:
     """True if the prompt contains an escape marker that disables the iron rule."""
     lower = prompt.lower()
     return any(m in lower for m in ESCAPE_MARKERS)
+
+
+def explicit_invocation(prompt: str) -> bool:
+    """True if the prompt is an explicit slash-command invocation (e.g. '/gstack',
+    '/ship prod', '/feature-dev:feature-dev'). The user has already chosen the
+    skill, so the router stands down — it must never reclassify an explicit
+    command into a different skill. Filesystem paths ('/Users/...') are not
+    matched and route normally. See EXPLICIT_INVOCATION_RE."""
+    return bool(EXPLICIT_INVOCATION_RE.match(prompt))
 
 
 def write_pending(chain: list[Step], path: str, domains: list[str]) -> None:
@@ -560,46 +674,97 @@ def clear_pending() -> None:
 
 # ---- Strike-based soft-mode (per-skill follow-rate enforcement) -------------
 
-def _load_strikes() -> dict[str, int]:
-    """Return the strike map. Fail-open with {} on any error."""
-    if not STRIKES.is_file():
-        return {}
-    try:
-        data = json.loads(STRIKES.read_text() or "{}")
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
+def _now_epoch() -> float:
+    return time.time()
 
 
-def _write_strikes(strikes: dict[str, int]) -> None:
+def _decay_counts(raw: dict) -> dict[str, int]:
+    """Normalize a demotion tally, dropping entries older than DEFER_TTL_DAYS.
+
+    Two on-disk shapes are accepted:
+      {"skill": 3}                          legacy, no timestamp
+      {"skill": {"n": 3, "ts": <epoch>}}    current
+
+    A legacy bare integer has no timestamp, so its age is unknowable and it is
+    treated as expired. That is deliberate: the legacy files on this machine
+    were the permanent tombstones this TTL exists to end, and honoring them
+    would carry the bug forward across the upgrade.
+    """
+    cutoff = _now_epoch() - DEFER_TTL_DAYS * 86400
+    out: dict[str, int] = {}
+    for skill, val in (raw or {}).items():
+        if isinstance(val, dict):
+            try:
+                n = int(val.get("n", 0))
+                ts = float(val.get("ts", 0))
+            except (TypeError, ValueError):
+                continue
+            if n > 0 and ts >= cutoff:
+                out[skill] = n
+    return out
+
+
+def _bump_count(path: Path, skill: str) -> None:
+    """Increment a demotion tally for `skill`, stamped with the current time."""
+    if not skill:
+        return
+    raw: dict = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text() or "{}")
+            if isinstance(loaded, dict):
+                raw = loaded
+        except (json.JSONDecodeError, OSError):
+            raw = {}
+    live = _decay_counts(raw)
+    live[skill] = live.get(skill, 0) + 1
+    payload = {s: {"n": n, "ts": _now_epoch()} for s, n in live.items()}
     try:
-        STRIKES.parent.mkdir(parents=True, exist_ok=True)
-        STRIKES.write_text(json.dumps(strikes, sort_keys=True) + "\n")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, sort_keys=True) + "\n")
     except OSError:
         pass
 
 
-def _bump_strikes(skills: list[str]) -> None:
-    """Increment strike count for each skill in the list."""
-    if not skills:
+def _clear_count(path: Path, skill: str) -> None:
+    """Drop `skill` from a demotion tally — it was invoked, so it is re-armed."""
+    if not skill or not path.is_file():
         return
-    strikes = _load_strikes()
+    try:
+        raw = json.loads(path.read_text() or "{}")
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(raw, dict) or skill not in raw:
+        return
+    del raw[skill]
+    try:
+        path.write_text(json.dumps(raw, sort_keys=True) + "\n")
+    except OSError:
+        pass
+
+
+def _load_strikes() -> dict[str, int]:
+    """Return the live strike map, expired entries already dropped."""
+    if not STRIKES.is_file():
+        return {}
+    try:
+        data = json.loads(STRIKES.read_text() or "{}")
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return _decay_counts(data if isinstance(data, dict) else {})
+
+
+def _bump_strikes(skills: list[str]) -> None:
+    """Add one strike to each skill announced but never invoked this turn."""
     for s in skills:
-        if not isinstance(s, str) or not s:
-            continue
-        strikes[s] = int(strikes.get(s, 0)) + 1
-    _write_strikes(strikes)
+        if isinstance(s, str) and s:
+            _bump_count(STRIKES, s)
 
 
 def reset_strikes(skill: str) -> None:
-    """Reset (delete) strikes for `skill`. Called via PostToolUse Skill hook
-    so any successful invoke re-arms the skill for IRON enforcement next time."""
-    if not skill:
-        return
-    strikes = _load_strikes()
-    if skill in strikes:
-        del strikes[skill]
-        _write_strikes(strikes)
+    """Clear strikes for `skill`. Called via the PostToolUse Skill hook so any
+    successful invoke re-arms the skill for IRON enforcement next time."""
+    _clear_count(STRIKES, skill)
 
 
 def is_soft(skill: str) -> bool:
@@ -609,7 +774,259 @@ def is_soft(skill: str) -> bool:
     return int(_load_strikes().get(skill, 0)) >= STRIKE_THRESHOLD
 
 
+# ---- Reasoned overrides (the ask+learn loop) -------------------------------
+
+def _load_overrides_count() -> dict[str, int]:
+    """Return the live reasoned-override tally, expired entries dropped."""
+    if not OVERRIDES_COUNT.is_file():
+        return {}
+    try:
+        data = json.loads(OVERRIDES_COUNT.read_text() or "{}")
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return _decay_counts(data if isinstance(data, dict) else {})
+
+
+def _bump_override_count(skill: str) -> None:
+    """Record one reasoned override against `skill`, stamped with the time."""
+    _bump_count(OVERRIDES_COUNT, skill)
+
+
+def reset_override_count(skill: str) -> None:
+    """Clear the reasoned-override tally for `skill`. Called via the PostToolUse
+    Skill hook so a successful invoke re-arms the skill for full enforcement."""
+    _clear_count(OVERRIDES_COUNT, skill)
+
+
+def is_overridden(skill: str) -> bool:
+    """True if `skill` has accumulated >= OVERRIDE_THRESHOLD reasoned overrides.
+    Like strike-based soft mode, but driven by the model explicitly stating the
+    route was wrong (via scripts/router_override.py) rather than a silent miss.
+    Reset on a successful invoke, so a skill recovers as soon as it's used."""
+    return int(_load_overrides_count().get(skill, 0)) >= OVERRIDE_THRESHOLD
+
+
+def is_deferred(skill: str) -> bool:
+    """A skill is deferred — dropped from announcements, no IRON rule — if it is
+    in strike-based soft mode OR has crossed the reasoned-override threshold."""
+    return is_soft(skill) or is_overridden(skill)
+
+
+def record_override(reason: str, prompt: Optional[str] = None) -> dict:
+    """Record a reasoned override of the current pending route, then clear it.
+
+    The collaborative escape hatch. Instead of the model being forced to invoke
+    a route it judges wrong (or the user having to type [no-router]), the model
+    states *why* and proceeds. This:
+      1. reads the announced skill from pending state,
+      2. appends an audit line to OVERRIDES_LOG with the reason,
+      3. bumps the per-skill override tally so is_overridden() can defer the
+         skill on similar future prompts, and
+      4. clears pending so the PreToolUse / Stop hooks pass through.
+
+    Fail-soft throughout — an override must never crash the model's turn.
+    Returns a summary dict for the CLI wrapper to print.
+    """
+    reason = (reason or "").strip()
+    announced = ""
+    try:
+        if PENDING.is_file():
+            prior = json.loads(PENDING.read_text() or "{}")
+            announced = prior.get("primary") or (prior.get("remaining") or [""])[0] or ""
+    except (json.JSONDecodeError, OSError):
+        announced = ""
+    entry: dict = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "skill": announced,
+        "reason": reason,
+    }
+    if prompt:
+        entry["prompt_hash"] = hashlib.sha256(
+            prompt.encode("utf-8", errors="replace")
+        ).hexdigest()[:16]
+    try:
+        OVERRIDES_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with OVERRIDES_LOG.open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError:
+        pass
+    if announced:
+        _bump_override_count(announced)
+    # Clear pending so the IRON RULE stops blocking this turn.
+    try:
+        PENDING.write_text("{}\n")
+    except OSError:
+        pass
+    count = _load_overrides_count().get(announced, 0) if announced else 0
+    return {"skill": announced, "reason": reason, "count": count}
+
+
 # ---- Personalized re-ranking from 30-day history ---------------------------
+
+# ---- Personal project routes -----------------------------------------------
+#
+# The routing table is generic: it knows what *kind* of work a prompt is, not
+# which of your projects it belongs to. "ship the next video" and "submit to
+# TestFlight" both read as OPERATE/ship, but one wants youtube-manager and the
+# other wants scrollbook-deploy — and no amount of pattern tuning on generic
+# English recovers that. Project routes close the gap with the one thing the
+# router can be certain about: a name that only ever means one project.
+#
+# They are read from a fenced ```yaml routes: block in SKILL.personal.md, so
+# adding a project is a text edit, not a code change. Deliberately parsed by
+# hand rather than with PyYAML: this runs inside a 3-second UserPromptSubmit
+# hook on whatever python3 happens to be first on PATH, and a missing
+# third-party import there would take the whole router down.
+
+PERSONAL_FILE = Path(__file__).resolve().parents[1] / "SKILL.personal.md"
+
+# A trigger shorter than this is too collision-prone to be evidence — "qa" or
+# "ios" would fire on half of all prompts.
+MIN_TRIGGER_LEN = 4
+
+
+@dataclass(frozen=True)
+class PersonalRoute:
+    name: str
+    triggers: tuple[str, ...]
+    skill: str
+    agent: str = "general-purpose"
+    thinking: str = "none"
+    path: str = "BUILD"
+    matched: str = ""
+
+
+def _parse_personal_routes(text: str) -> list[PersonalRoute]:
+    """Parse the `routes:` list out of SKILL.personal.md.
+
+    Expected shape (inside any fenced yaml block):
+
+        routes:
+          - name: youtube-pipeline
+            when: ["@economicalai", "youtube short"]
+            skill: youtube-manager
+            agent: yt-showrunner
+            path: OPERATE
+            thinking: think
+
+    Anything malformed is skipped rather than raised. A typo in a personal
+    config file must degrade to "that one route is ignored", never to "the
+    router crashed and you lost the announcement".
+    """
+    routes: list[PersonalRoute] = []
+    in_routes = False
+    cur: dict[str, object] = {}
+
+    def flush() -> None:
+        skill = str(cur.get("skill") or "").strip()
+        triggers = tuple(
+            t for t in (cur.get("when") or ())  # type: ignore[union-attr]
+            if isinstance(t, str) and len(t.strip()) >= MIN_TRIGGER_LEN
+        )
+        if skill and triggers:
+            routes.append(PersonalRoute(
+                name=str(cur.get("name") or skill),
+                triggers=tuple(t.strip().lower() for t in triggers),
+                skill=skill,
+                agent=str(cur.get("agent") or "general-purpose"),
+                thinking=str(cur.get("thinking") or "none"),
+                path=str(cur.get("path") or "BUILD").upper(),
+            ))
+        cur.clear()
+
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("routes:"):
+            in_routes = True
+            continue
+        if not in_routes:
+            continue
+        # The block ends at the closing fence or any new top-level key.
+        if stripped.startswith("```") or (raw and not raw[0].isspace() and not stripped.startswith("-")):
+            flush()
+            in_routes = False
+            continue
+        if stripped.startswith("- "):
+            flush()
+            stripped = stripped[2:].strip()
+        if ":" not in stripped:
+            continue
+        key, _, val = stripped.partition(":")
+        key = key.strip()
+        val = val.strip()
+        if key == "when":
+            items = val.strip("[]")
+            cur["when"] = [
+                piece.strip().strip("\"'")
+                for piece in items.split(",")
+                if piece.strip().strip("\"'")
+            ]
+        elif key in ("name", "skill", "agent", "thinking", "path"):
+            cur[key] = val.strip("\"'")
+    flush()
+    return routes
+
+
+@functools.lru_cache(maxsize=1)
+def load_personal_routes() -> tuple[PersonalRoute, ...]:
+    if not PERSONAL_FILE.is_file():
+        return ()
+    try:
+        return tuple(_parse_personal_routes(PERSONAL_FILE.read_text(encoding="utf-8")))
+    except OSError:
+        return ()
+
+
+def match_personal_route(prompt: str) -> Optional[PersonalRoute]:
+    """First project route whose trigger appears in the prompt, or None.
+
+    First match wins, so file order is priority order. The route is dropped if
+    its skill is not installed — a personal file that names a skill you removed
+    should go quiet, not deadlock the IRON RULE on a name Claude cannot invoke.
+    """
+    low = prompt.lower()
+    for route in load_personal_routes():
+        for trigger in route.triggers:
+            if trigger in low:
+                if not valid_skill(route.skill):
+                    print(f"[skill-router-warn] personal route '{route.name}' names "
+                          f"uninstalled skill '{route.skill}'", file=sys.stderr)
+                    break
+                agent = route.agent if valid_agent(route.agent) else "general-purpose"
+                return PersonalRoute(
+                    name=route.name, triggers=route.triggers, skill=route.skill,
+                    agent=agent, thinking=route.thinking,
+                    path=route.path if route.path in ("BROKEN", "BUILD", "OPERATE") else "BUILD",
+                    matched=trigger,
+                )
+    return None
+
+
+# ---- Specialist layer -------------------------------------------------------
+
+def specialist_for(prompt: str, exclude: list[str]) -> Optional[tuple[str, str]]:
+    """Best installed domain specialist for the prompt, or None.
+
+    Returns (skill_name, one_line_description). Advisory, never enforced: the
+    IRON RULE covers the process skill only, because a specialist suggestion
+    that turns out wrong should cost a glance, not a blocked turn.
+    """
+    if os.environ.get("SKILL_ROUTER_NO_CATALOG") == "1":
+        return None
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import catalog_match  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        match = catalog_match.best(prompt, exclude=exclude)
+    except Exception:  # never let ranking break a turn
+        return None
+    if match is None:
+        return None
+    desc = " ".join(match.description.split())[:110]
+    return match.name, desc
+
 
 HISTORY = Path.home() / ".claude" / "skill_router_history.json"
 
@@ -665,6 +1082,23 @@ ROUTED_SKILL_ALIASES: frozenset[str] = frozenset({
 
 
 @functools.lru_cache(maxsize=1)
+def _builtin_skills() -> frozenset[str]:
+    """Skills the Claude Code binary ships with.
+
+    They are invokable but live nowhere on disk, so the directory scan cannot
+    see them and valid_skill() would reject every one — silently making
+    `code-review`, `dataviz` and `security-review` unroutable. The names come
+    from the catalog builder, which owns the list.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from build_catalog import BUILTIN_SKILLS  # type: ignore[import-not-found]
+        return frozenset(BUILTIN_SKILLS)
+    except ImportError:
+        return frozenset()
+
+
+@functools.lru_cache(maxsize=1)
 def _skill_catalog() -> Optional[set[str]]:
     """Return the set of skill names that exist on disk, or None if the
     catalog can't be loaded (so callers fail open).
@@ -672,9 +1106,10 @@ def _skill_catalog() -> Optional[set[str]]:
     Layouts scanned:
       1. ~/.claude/skills/<name>/        → bare name (e.g., 'refactor')
       2. ~/.claude/commands/<name>.md    → bare name (slash-command)
-      3. ~/.claude/agents/<name>.md      → bare name (subagent)
-      4. ~/.claude/plugins/cache/<repo>/<plugin>/<version>/skills/<skill>/SKILL.md
+      3. ~/.claude/plugins/cache/<repo>/<plugin>/<version>/skills/<skill>/SKILL.md
          → namespaced as '<plugin>:<skill>' AND bare '<skill>'
+
+    Sub-agents are deliberately excluded — see the AGENTS_DIR comment.
 
     All of these surface as valid `Skill(skill="<name>")` targets in the
     Claude Code harness. Plus a static ROUTED_SKILL_ALIASES whitelist for
@@ -684,7 +1119,7 @@ def _skill_catalog() -> Optional[set[str]]:
     doesn't change between hook invocations within a single turn, and the
     hook is short-lived enough that staleness doesn't matter.
     """
-    catalog: set[str] = set(ROUTED_SKILL_ALIASES)
+    catalog: set[str] = set(ROUTED_SKILL_ALIASES) | set(_builtin_skills())
     found_any = False
 
     # Bare skills under ~/.claude/skills/
@@ -701,16 +1136,6 @@ def _skill_catalog() -> Optional[set[str]]:
     if COMMANDS_DIR.is_dir():
         try:
             for entry in COMMANDS_DIR.iterdir():
-                if entry.is_file() and entry.suffix == ".md":
-                    catalog.add(entry.stem)
-                    found_any = True
-        except OSError:
-            pass
-
-    # Subagents under ~/.claude/agents/<name>.md
-    if AGENTS_DIR.is_dir():
-        try:
-            for entry in AGENTS_DIR.iterdir():
                 if entry.is_file() and entry.suffix == ".md":
                     catalog.add(entry.stem)
                     found_any = True
@@ -755,6 +1180,54 @@ def _skill_catalog() -> Optional[set[str]]:
     if not found_any:
         return None
     return catalog
+
+
+@functools.lru_cache(maxsize=1)
+def _agent_catalog() -> Optional[set[str]]:
+    """Every name that is legal as `Agent(subagent_type=...)`.
+
+    Kept separate from the skill catalog on purpose. Announcing an agent as a
+    skill deadlocks the IRON RULE; announcing a skill as an agent fails the
+    dispatch. Returns None (fail open) when nothing can be enumerated.
+    """
+    agents: set[str] = {"general-purpose", "Explore", "Plan", "claude"}
+    found = False
+    if AGENTS_DIR.is_dir():
+        try:
+            for f in AGENTS_DIR.iterdir():
+                if f.is_file() and f.suffix == ".md" and not f.name.startswith("_"):
+                    agents.add(f.stem)
+                    found = True
+        except OSError:
+            pass
+    if PLUGINS_DIR.is_dir():
+        try:
+            for repo in PLUGINS_DIR.iterdir():
+                if not repo.is_dir():
+                    continue
+                for plugin in repo.iterdir():
+                    if not plugin.is_dir():
+                        continue
+                    for version in plugin.iterdir():
+                        for root in (version / "agents", version / ".claude" / "agents"):
+                            if not root.is_dir():
+                                continue
+                            for f in root.iterdir():
+                                if f.is_file() and f.suffix == ".md":
+                                    agents.add(f"{plugin.name}:{f.stem}")
+                                    agents.add(f.stem)
+                                    found = True
+        except OSError:
+            pass
+    return agents if found else None
+
+
+def valid_agent(name: str) -> bool:
+    """True if `name` can be passed as Agent(subagent_type=...). Fails open."""
+    if not name:
+        return False
+    catalog = _agent_catalog()
+    return True if catalog is None else name in catalog
 
 
 def valid_skill(name: str) -> bool:
@@ -808,15 +1281,44 @@ def log_chain(path: str, chain: list[Step], domains: list[str]) -> None:
 # ---- Entry point ------------------------------------------------------------
 
 def _drop_soft(chain: list[Step]) -> list[Step]:
-    """Filter out steps whose skill is in soft mode (>= STRIKE_THRESHOLD
-    consecutive unsatisfied announcements). Silent: no announcement, no
+    """Filter out steps whose skill is deferred — either strike-based soft mode
+    (>= STRIKE_THRESHOLD silent misses) or reasoned-override mode
+    (>= OVERRIDE_THRESHOLD explicit corrections). Silent: no announcement, no
     enforcement, no log noise. Returns a new list; original untouched."""
-    return [s for s in chain if not is_soft(s.skill)]
+    return [s for s in chain if not is_deferred(s.skill)]
+
+
+def _finish(path: str, chain: list[Step], domains: list[str],
+            prompt: str, note: str = "") -> tuple[str, list[Step], list[str], str]:
+    """Render an announcement and bolt the advisory specialist line onto it."""
+    announcement = render(path, chain, domains, note=note)
+    if not announcement:
+        return path, chain, domains, ""
+    found = specialist_for(prompt, exclude=[s.skill for s in chain])
+    if found is not None:
+        name, desc = found
+        announcement += (
+            f"\n[skill-router] Specialist available: {name}"
+            f"{' — ' + desc if desc else ''}"
+            f"\n[skill-router] (advisory — load it alongside the step above if it fits; "
+            f"not enforced)"
+        )
+    return path, chain, domains, announcement
 
 
 def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     """Return (path, chain, domains, announcement)."""
     domains = detect_domains(prompt)
+
+    # Project routes win over triage. A prompt naming one of your projects is
+    # the least ambiguous signal the router ever gets, and generic triage
+    # cannot recover it — see the PersonalRoute docs.
+    personal = match_personal_route(prompt)
+    if personal is not None and not is_deferred(personal.skill):
+        chain = [Step(personal.skill, personal.agent, "inherit", personal.thinking)]
+        return _finish(personal.path, chain, domains, prompt,
+                       note=f"project route `{personal.name}`")
+
     path = triage(prompt)
     if path == "SKIP":
         # Local embedding fallback — fail-open. The daemon is local-only
@@ -832,7 +1334,7 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
                 chain = _drop_soft(chain)
                 if not chain:
                     return "SKIP", [], domains, ""
-                return path, chain, domains, render(path, chain, domains)
+                return _finish(path, chain, domains, prompt)
             print(f"[skill-router-warn] embedding ghost skill: {ghost}", file=sys.stderr)
         return "SKIP", [], domains, ""
     if path == "BROKEN":
@@ -855,7 +1357,7 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     chain = _drop_soft(chain)
     if not chain:
         return "SKIP", [], domains, ""
-    return path, chain, domains, render(path, chain, domains)
+    return _finish(path, chain, domains, prompt)
 
 
 def _try_embedding_fallback(prompt: str) -> Optional[tuple[str, list[Step], list[str]]]:
@@ -907,11 +1409,11 @@ def _try_embedding_fallback(prompt: str) -> Optional[tuple[str, list[Step], list
     # require domain detection, which the regex layer already does. Single-
     # step is the safe wedge.
     if path == "BROKEN":
-        chain = [Step(skill, "general-purpose", "sonnet", "think")]
+        chain = [Step(skill, "general-purpose", "inherit", "think")]
     elif path == "BUILD":
-        chain = [Step(skill, "feature-dev:code-architect", "sonnet", "think")]
+        chain = [Step(skill, "feature-dev:code-architect", "inherit", "think")]
     else:  # OPERATE
-        chain = [Step(skill, "general-purpose", "sonnet", "none")]
+        chain = [Step(skill, "general-purpose", "inherit", "none")]
 
     _log_embedding_attempt(prompt, result, accepted=True)
 
@@ -1148,6 +1650,15 @@ def main() -> int:
         return 0
     # Escape hatch: user explicitly opts out of routing for this turn.
     if escape_active(prompt):
+        return 0
+    # Explicit slash-command invocation: the user already chose the skill. Stand
+    # down entirely — no classification, no embedder rescue, no IRON rule. The
+    # router must never reclassify an explicit command into a different skill.
+    # (Pending was already cleared above in hook_mode.)
+    if explicit_invocation(prompt):
+        if os.environ.get("SKILL_ROUTER_DEBUG") == "1":
+            print("[skill-router] (stand-down — explicit slash-command invocation)",
+                  file=sys.stderr)
         return 0
     try:
         path, chain, domains, announcement = route(prompt)

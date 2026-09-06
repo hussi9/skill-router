@@ -79,3 +79,75 @@ All notable changes to skill-router. Newest first.
 - **`e43ee39`** — Go-live hardening, audit blockers fixed.
 - **`90cc25a`** — Repo cleanup, archived internals.
 - **`fb923dd`** — Initial release.
+
+## v3 — routing that is actually connected (2026-09-05)
+
+The router had been inert for months. Everything around it looked healthy: unit
+tests green, docs accurate, calibration claiming 100%. Two independent faults,
+either of which alone produces total silence.
+
+### Fixed — why nothing was routing
+
+- **Hooks were absent from `settings.json`.** The engine had no caller. They
+  survived only in a `.bak` from June. `scripts/install_hooks.py` now installs
+  them by merging beside other tools' hooks (Sentigent, gstack, the formatter)
+  rather than replacing arrays, and is idempotent.
+- **Demotions never expired.** Two reasoned overrides ever removed a skill from
+  routing permanently. `systematic-debugging`, `writing-plans`, `brainstorming`,
+  `requesting-code-review` and `frontend-design` had all been silently killed —
+  the entire BROKEN path and most of BUILD. Tallies are now timestamped and
+  expire after `DEFER_TTL_DAYS`; untimestamped legacy entries are ignored.
+- **`test-runner` was announced as a skill.** It is a sub-agent. `Skill(skill=
+  "test-runner")` fails, and the IRON RULE then blocks every edit waiting for a
+  call that cannot succeed. Sub-agents are no longer in the skill catalog;
+  `valid_agent()` checks them separately.
+- **The `PostToolUse` chain read stdin four times.** Four shell hooks on the
+  same matcher each began with `cat`; only the first saw the payload, so a
+  successful invoke never cleared a demotion. One process now does all four
+  jobs.
+- **The test suite read live user state**, so a demotion recorded during real
+  work changed what the tests asserted. Hermetic now — which is how a green
+  suite coexisted with a dead router.
+
+### Changed — efficiency
+
+- **Model column is `inherit`.** It used to name `sonnet`/`opus`, written when
+  the parent was always Sonnet. On a Fable or Opus session the dispatch
+  protocol read that as "fan out to a sub-agent" and shipped every routed step
+  to a weaker model. Depth now comes from `thinking`, which composes with any
+  model.
+- **The IRON RULE block is 4 lines, down from 9.** It is injected on every
+  routed turn, so each line is a permanent context tax.
+
+### Added — using all 395 skills instead of 20
+
+- **`build_catalog.py`** inventories every invokable skill: user, project,
+  plugin (newest version only), slash-commands, and the 17 built-ins that live
+  nowhere on disk and so could never be routed to. Descriptions are synthesized
+  for files without frontmatter. Rebuilds every `SessionStart`.
+- **`catalog_match.py`** ranks the catalog lexically per prompt and appends one
+  advisory `Specialist available:` line. Pure stdlib, ~5ms, no daemon — the
+  embedder it replaces had been dead for months, taking the semantic layer with
+  it. Three gates keep it silent when unsure.
+- **Project routes** in `SKILL.personal.md`, parsed and enforced. Generic triage
+  cannot tell "ship the next one" (a YouTube short) from "submit the build"
+  (Scrollbook); a name that means exactly one project can.
+- **Sub-agent routing.** A `SubagentStart` hook briefs every dispatched agent on
+  the skills that fit its job, from `agent_skills.json` or derived from the
+  agent's own description. Verified live: a dispatched agent quoted the brief
+  back. The documented `skills:` frontmatter preload was tested and did not
+  work on 2.1.263.
+- **IRON RULE stands down inside sub-agents.** The parent's pending skill
+  belongs to the parent's turn; enforcing it inside an agent blocked every edit
+  with no way to satisfy it.
+- **`doctor.py`** — six checks, end to end. This outage would have shown as one
+  failing line.
+- **`check.sh`** — the whole gate locally, no metered CI.
+
+### Accuracy
+
+| | before | after |
+|---|---|---|
+| Path accuracy (109 prompts) | 67.0% | 100% |
+| Skill accuracy | 43.3% | 100% |
+| Unit + hook tests | 16 failing | 104 passing |

@@ -34,6 +34,19 @@ os.environ.setdefault("SKILL_ROUTER_NO_EMBED", "1")
 
 import router  # type: ignore[import-not-found]
 
+# Calibration measures the routing logic, not whatever demotions this machine
+# happens to be carrying today. Without this, a demoted skill silently turns
+# into a "miss" and the score reports a routing regression that is really a
+# state problem — which is how a 100%-accuracy claim survived alongside a
+# router that answered SKIP to every BROKEN prompt.
+import tempfile
+_STATE = tempfile.mkdtemp(prefix="calibration-state-")
+router.PENDING = Path(_STATE) / "pending.json"
+router.STRIKES = Path(_STATE) / "strikes.json"
+router.OVERRIDES_COUNT = Path(_STATE) / "overrides_count.json"
+for _f in (router.PENDING, router.STRIKES, router.OVERRIDES_COUNT):
+    _f.write_text("{}\n")
+
 
 class Case(NamedTuple):
     prompt: str
@@ -52,9 +65,9 @@ CASES: list[Case] = [
     Case("uncaught exception in production logs", "BROKEN", "systematic-debugging"),
     Case("the app crashes on launch", "BROKEN", "systematic-debugging"),
     Case("crashing every time I open the settings page", "BROKEN", "systematic-debugging"),
-    Case("test suite is failing — 12 tests red", "BROKEN", "test-runner"),
-    Case("our tests are broken after the merge", "BROKEN", "test-runner"),
-    Case("failing tests in the auth module", "BROKEN", "test-runner"),
+    Case("test suite is failing — 12 tests red", "BROKEN", "systematic-debugging"),
+    Case("our tests are broken after the merge", "BROKEN", "systematic-debugging"),
+    Case("failing tests in the auth module", "BROKEN", "systematic-debugging"),
     Case("typescript is throwing 47 type errors", "BROKEN", "systematic-debugging"),
     Case("type errors in the new auth types file", "BROKEN", "systematic-debugging"),
     Case("deploy failed in CI", "BROKEN", "systematic-debugging"),
@@ -82,17 +95,17 @@ CASES: list[Case] = [
     Case("add Twilio SMS to the order flow", "BUILD", "connect-apps"),
     Case("integrate Plaid bank linking", "BUILD", "connect-apps"),
     Case("connect Resend for transactional emails", "BUILD", "connect-apps"),
-    Case("Create a new database schema for notifications", "BUILD", "db-expert"),
-    Case("build a new migration to add a status column", "BUILD", "db-expert"),
-    Case("new schema for the audit log table", "BUILD", "db-expert"),
+    Case("Create a new database schema for notifications", "BUILD", "supabase"),
+    Case("build a new migration to add a status column", "BUILD", "supabase"),
+    Case("new schema for the audit log table", "BUILD", "supabase"),
     Case("Write a new Claude skill file for ML model routing", "BUILD", "writing-skills"),
     Case("write a new skill for domain validation", "BUILD", "writing-skills"),
     Case("add a new edge function that sends email on save", "BUILD", "vercel:vercel-functions"),
     Case("create a new lambda for image processing", "BUILD", "vercel:vercel-functions"),
     Case("build a new ios screen for onboarding", "BUILD", "frontend-design"),
     Case("add a new mobile screen with biometrics", "BUILD", "writing-plans"),
-    Case("create a new RAG pipeline for the docs", "BUILD", "brainstorming"),
-    Case("build an embedding-based search", "BUILD", "brainstorming"),
+    Case("create a new RAG pipeline for the docs", "BUILD", "writing-plans"),
+    Case("build an embedding-based search", "BUILD", "writing-plans"),
 
     # Multi-domain BUILD → writing-plans
     Case("build a new dashboard page that writes to the supabase database and sends emails on save", "BUILD", "writing-plans"),

@@ -1,0 +1,743 @@
+- main [ref=e2]:
+  - navigation "Main navigation" [ref=e4]:
+    - generic [ref=e5]:
+      - link "AIMasterz home" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]:
+          - img "AIMasterz Logo" [ref=e11]
+          - generic [ref=e13]: AIMasterz
+      - generic [ref=e14]:
+        - link "Services" [ref=e15] [cursor=pointer]:
+          - /url: /#dental-ai-stack
+        - link "Pricing" [ref=e16] [cursor=pointer]:
+          - /url: /#pricing
+        - link "Guides" [ref=e17] [cursor=pointer]:
+          - /url: /guides
+        - link "Work" [ref=e18] [cursor=pointer]:
+          - /url: /#portfolio
+        - link "Audit" [ref=e19] [cursor=pointer]:
+          - /url: /audit
+        - link "About" [ref=e20] [cursor=pointer]:
+          - /url: /#process
+        - link "Contact" [ref=e21] [cursor=pointer]:
+          - /url: /#contact
+      - link "Get a free audit" [ref=e23] [cursor=pointer]:
+        - /url: /audit
+        - text: Get a free audit
+        - img [ref=e24]
+  - generic [ref=e29]:
+    - generic [ref=e30]:
+      - paragraph [ref=e31]: AIMasterz / fixed-price AI systems / Bellevue
+      - heading "AI systems for businesses that need revenue, not demos." [level=1] [ref=e32]
+    - generic [ref=e33]:
+      - paragraph [ref=e34]: We build lead capture, AI receptionist, outbound, content, and operations systems for small businesses. Fixed scope, fixed price, live fast.
+      - generic [ref=e35]:
+        - link "Get a free audit" [ref=e36] [cursor=pointer]:
+          - /url: /audit
+          - text: Get a free audit
+          - img [ref=e37]
+        - link "Browse guides" [ref=e39] [cursor=pointer]:
+          - /url: /guides
+          - text: Browse guides
+          - img [ref=e40]
+      - list "Industries served" [ref=e42]:
+        - listitem [ref=e43]: 77 SMB sites built
+        - listitem [ref=e44]: Cosmetic dental
+        - listitem [ref=e45]: Law firms
+        - listitem [ref=e46]: Real estate
+        - listitem [ref=e47]: Med spas
+        - listitem [ref=e48]: Service trades
+        - listitem [ref=e49]: Hospitality
+  - generic [ref=e52]:
+    - img [ref=e53]
+    - paragraph [ref=e56]: You own the code, the cloud, and the data. 30-day cancellation with clean handoff. Operated by AIMasterz.
+  - generic [ref=e59]:
+    - generic [ref=e60]:
+      - generic [ref=e62]: The AI stack
+      - heading "Six AI services that layer into your practice" [level=2] [ref=e65]
+      - paragraph [ref=e67]: Each service is bundled into a retainer tier. We provision, configure, and run all of them - vendors stay under our agency umbrella so you pay one monthly bill.
+    - generic [ref=e68]:
+      - generic [ref=e71]:
+        - generic [ref=e72]: Start here
+        - generic [ref=e73]:
+          - generic [ref=e74]: 🚀
+          - text: Growth tier
+        - heading "AI Receptionist" [level=3] [ref=e75]
+        - paragraph [ref=e76]: Answers calls 24/7, books appointments, hot-transfer to staff
+        - separator [ref=e77]
+        - generic [ref=e78]:
+          - img [ref=e79]
+          - generic [ref=e83]: "Vendor: Retell AI"
+        - generic [ref=e84]:
+          - img [ref=e85]
+          - generic [ref=e87]: Bundled, configured, and operated by AIMasterz. You own the data and configs.
+        - link "Book a 20-min call about AI Receptionist" [ref=e88] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e89]
+      - generic [ref=e92]:
+        - generic [ref=e93]:
+          - generic [ref=e94]: 🌱
+          - text: Foundation tier
+        - heading "AI Chat Widget" [level=3] [ref=e95]
+        - paragraph [ref=e96]: Trained on your services, hours, pricing
+        - separator [ref=e97]
+        - generic [ref=e98]:
+          - img [ref=e99]
+          - generic [ref=e103]: "Vendor: Chatling"
+        - generic [ref=e104]:
+          - img [ref=e105]
+          - generic [ref=e107]: Bundled, configured, and operated by AIMasterz. You own the data and configs.
+        - link "Book a 20-min call about AI Chat Widget" [ref=e108] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e109]
+      - generic [ref=e112]:
+        - generic [ref=e113]:
+          - generic [ref=e114]: 🚀
+          - text: Growth tier
+        - heading "Review Automation" [level=3] [ref=e115]
+        - paragraph [ref=e116]: Post-visit review requests, sentiment routing, GBP sync
+        - separator [ref=e117]
+        - generic [ref=e118]:
+          - img [ref=e119]
+          - generic [ref=e123]: "Vendor: NiceJob"
+        - generic [ref=e124]:
+          - img [ref=e125]
+          - generic [ref=e127]: Bundled, configured, and operated by AIMasterz. You own the data and configs.
+        - link "Book a 20-min call about Review Automation" [ref=e128] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e129]
+      - generic [ref=e132]:
+        - generic [ref=e133]:
+          - generic [ref=e134]: 🌱
+          - text: Foundation tier
+        - heading "Smile Simulator" [level=3] [ref=e135]
+        - paragraph [ref=e136]: Gemini-powered before/after visualizer
+        - separator [ref=e137]
+        - generic [ref=e138]:
+          - img [ref=e139]
+          - generic [ref=e143]: "Vendor: AIMasterz (custom, Gemini)"
+        - generic [ref=e144]:
+          - img [ref=e145]
+          - generic [ref=e147]: Bundled, configured, and operated by AIMasterz. You own the data and configs.
+        - link "Book a 20-min call about Smile Simulator" [ref=e148] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e149]
+      - generic [ref=e152]:
+        - generic [ref=e153]:
+          - generic [ref=e154]: 🌱
+          - text: Foundation tier
+        - heading "AI Lead Capture" [level=3] [ref=e155]
+        - paragraph [ref=e156]: Form with HOT/WARM/COLD scoring
+        - separator [ref=e157]
+        - generic [ref=e158]:
+          - img [ref=e159]
+          - generic [ref=e163]: "Vendor: Gemini 2.5 Flash"
+        - generic [ref=e164]:
+          - img [ref=e165]
+          - generic [ref=e167]: Bundled, configured, and operated by AIMasterz. You own the data and configs.
+        - link "Book a 20-min call about AI Lead Capture" [ref=e168] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e169]
+      - generic [ref=e172]:
+        - generic [ref=e173]:
+          - generic [ref=e174]: 🚀
+          - text: Growth tier
+        - heading "Social Autopilot" [level=3] [ref=e175]
+        - paragraph [ref=e176]: 3 posts/week on X, LinkedIn, IG with competitive framing
+        - separator [ref=e177]
+        - generic [ref=e178]:
+          - img [ref=e179]
+          - generic [ref=e183]: "Vendor: Publer"
+        - generic [ref=e184]:
+          - img [ref=e185]
+          - generic [ref=e187]: Bundled, configured, and operated by AIMasterz. You own the data and configs.
+        - link "Book a 20-min call about Social Autopilot" [ref=e188] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e189]
+    - generic [ref=e191]:
+      - paragraph [ref=e192]: Not sure which tier fits your practice?
+      - link "See the three tiers" [ref=e193] [cursor=pointer]:
+        - /url: "#pricing"
+        - text: See the three tiers
+        - img [ref=e194]
+  - region "You own it. We run it." [ref=e196]:
+    - generic [ref=e197]:
+      - generic [ref=e198]:
+        - generic [ref=e200]: How the retainer works
+        - heading "You own it. We run it." [level=2] [ref=e203]
+        - paragraph [ref=e205]: Setup gets you live on your own infrastructure in 7 to 30 days. The monthly retainer covers Quality Loop optimization, vendor management, and SLA. Cancel anytime with a clean handoff.
+      - generic [ref=e206]:
+        - generic [ref=e208]:
+          - img [ref=e210]
+          - generic [ref=e214]:
+            - heading "You own everything we build" [level=3] [ref=e215]
+            - paragraph [ref=e216]: Your Google Cloud project, your Supabase database, your domain, your source code snapshot at offboarding. When you fire us, the site keeps running and we revoke our admin access.
+        - generic [ref=e218]:
+          - img [ref=e220]
+          - generic [ref=e223]:
+            - heading "We operate it under our agency umbrella" [level=3] [ref=e224]
+            - paragraph [ref=e225]: Chatling, Retell, NiceJob, Publer, Kit, Fillout, Vyne, Frase, HeyGen, Fathom, Slite, HubSpot, NexHealth - you do not sign up. We manage vendors so you pay one monthly retainer.
+        - generic [ref=e227]:
+          - img [ref=e229]
+          - generic [ref=e234]:
+            - heading "Monthly Quality Loop optimization" [level=3] [ref=e235]
+            - paragraph [ref=e236]: "Every retainer covers Quality Loop tuning: lead scoring, chat responses, audit copy, vendor configs - all improved based on YOUR metrics each month. Not just maintenance, operating intelligence."
+        - generic [ref=e238]:
+          - img [ref=e240]
+          - generic [ref=e245]:
+            - heading "30-day cancellation with clean handoff" [level=3] [ref=e246]
+            - paragraph [ref=e247]: Month-to-month after setup. 30-day notice cancels. Source code lands in your GitHub org within 30 days. AIMasterz walks away. You keep everything.
+  - region "7 Claude capabilities power every automation we build" [ref=e248]:
+    - generic [ref=e249]:
+      - generic [ref=e250]:
+        - generic [ref=e252]: Built on Claude
+        - generic [ref=e254]:
+          - paragraph [ref=e255]: BUILT ON CLAUDE — THE WORLD'S MOST CAPABLE AI PLATFORM
+          - heading "7 Claude capabilities power every automation we build" [level=3] [ref=e256]
+        - paragraph [ref=e258]: We are the implementation layer above Claude. Anthropic ships the model. We ship the done-for-you workflows on top.
+      - generic [ref=e259]:
+        - generic [ref=e260]:
+          - img [ref=e262]
+          - heading "MCP Connector" [level=4] [ref=e264]
+          - paragraph [ref=e265]: Connect Gmail, Slack, Drive, Notion, CRM, Stripe. No integration code.
+        - generic [ref=e266]:
+          - img [ref=e268]
+          - heading "Managed Agents" [level=4] [ref=e271]
+          - paragraph [ref=e272]: Anthropic-hosted agent runtime with sandboxing and outcome tracking.
+        - generic [ref=e273]:
+          - img [ref=e275]
+          - heading "Computer Use" [level=4] [ref=e278]
+          - paragraph [ref=e279]: Automate legacy software without APIs via screenshots and clicks.
+        - generic [ref=e280]:
+          - img [ref=e282]
+          - heading "Memory Tool" [level=4] [ref=e290]
+          - paragraph [ref=e291]: Persistent learning across conversations. Each customer gets a Claude that gets smarter.
+      - generic [ref=e292]:
+        - generic [ref=e293]:
+          - img [ref=e295]
+          - heading "Agent Skills" [level=4] [ref=e297]
+          - paragraph [ref=e298]: PowerPoint, Excel, Word, PDF plus custom Skills for your workflows.
+        - generic [ref=e299]:
+          - img [ref=e301]
+          - heading "Multiagent Sessions" [level=4] [ref=e306]
+          - paragraph [ref=e307]: Multiple Claude agents collaborate on complex workflows.
+        - generic [ref=e308]:
+          - img [ref=e310]
+          - heading "1M Token Context" [level=4] [ref=e314]
+          - paragraph [ref=e315]: Process entire contract sets, customer histories, or codebases in one pass.
+      - paragraph [ref=e317]: Updated 2026-05-21. Anthropic launched Claude Managed Agents in April 2026 and Claude for Small Business in May 2026. We ship the implementations on top.
+  - generic [ref=e319]:
+    - generic [ref=e320]:
+      - generic [ref=e321]: Our work
+      - heading "77 SMB sites built" [level=2] [ref=e323]
+      - paragraph [ref=e324]: Cosmetic dental was our first vertical. Now expanding to law, real estate, med spas, hospitality, and service trades.
+    - generic [ref=e326]:
+      - generic [ref=e327]:
+        - paragraph [ref=e328]: Vertical
+        - paragraph [ref=e329]: Cosmetic Dental
+      - generic [ref=e330]:
+        - paragraph [ref=e331]: Region
+        - paragraph [ref=e332]: Pacific Northwest
+      - generic [ref=e333]:
+        - paragraph [ref=e334]: Next verticals
+        - paragraph [ref=e335]: Law · RE · Med Spa
+    - generic [ref=e337]:
+      - generic [ref=e338]:
+        - paragraph [ref=e339]: "01"
+        - heading "AI-built foundation" [level=3] [ref=e340]
+        - paragraph [ref=e341]: Custom design, treatment pages, SEO foundation - shipped in days not months.
+      - generic [ref=e342]:
+        - paragraph [ref=e343]: "02"
+        - heading "Layered services" [level=3] [ref=e344]
+        - paragraph [ref=e345]: Receptionist chat, SMS reminders, review automation, and more - mix what you need.
+      - generic [ref=e346]:
+        - paragraph [ref=e347]: "03"
+        - heading "Continuous upgrades" [level=3] [ref=e348]
+        - paragraph [ref=e349]: Quality Loop versions your stack every 30 days based on what your data shows.
+    - generic [ref=e350]:
+      - paragraph [ref=e351]: Want a custom site and AI stack for your business?
+      - link "Request a free 15-min audit" [ref=e352] [cursor=pointer]:
+        - /url: "#contact"
+  - generic [ref=e354]:
+    - generic [ref=e355]:
+      - generic [ref=e357]: We eat our own cooking
+      - heading "If we sell it, we run it on this site" [level=2] [ref=e360]
+      - paragraph [ref=e362]:
+        - text: The chat in the corner is our AI Receptionist. The
+        - link "/audit" [ref=e363] [cursor=pointer]:
+          - /url: /audit
+        - text: "page is our AI Auditor. Every CTA form is our lead-capture product. If a prospect asks “can you show me what it looks like?” — the answer is: you're already using it."
+    - list [ref=e364]:
+      - listitem [ref=e366]:
+        - img [ref=e368]
+        - generic [ref=e370]:
+          - generic [ref=e371]:
+            - generic [ref=e372]: AI Receptionist
+            - generic [ref=e373]: Chat widget — bottom right of every page
+          - paragraph [ref=e374]: The chat bubble you see on this site is our own AI Receptionist product.
+        - 'generic "Status: Live" [ref=e375]': Live
+      - listitem [ref=e377]:
+        - img [ref=e379]
+        - generic [ref=e384]:
+          - generic [ref=e385]:
+            - generic [ref=e386]: AI Auditor
+            - generic [ref=e387]: /audit — free scoring page
+          - paragraph [ref=e388]: The /audit page demo's our website audit tool. Enter any business URL.
+        - 'generic "Status: Live" [ref=e389]': Live
+      - listitem [ref=e391]:
+        - img [ref=e393]
+        - generic [ref=e397]:
+          - generic [ref=e398]:
+            - generic [ref=e399]: Lead Capture Forms+
+            - generic [ref=e400]: Every CTA on this site
+          - paragraph [ref=e401]: Our contact and audit forms are our smart lead-capture product, live.
+        - 'generic "Status: Live" [ref=e402]': Live
+      - listitem [ref=e404]:
+        - img [ref=e406]
+        - generic [ref=e409]:
+          - generic [ref=e410]:
+            - generic [ref=e411]: Content Engine
+            - generic [ref=e412]: /blog (coming soon)
+          - paragraph [ref=e413]: Our blog will be drafted by our own content engine, clearly labelled.
+        - 'generic "Status: Live" [ref=e414]': Live
+      - listitem [ref=e416]:
+        - img [ref=e418]
+        - generic [ref=e421]:
+          - generic [ref=e422]:
+            - generic [ref=e423]: Local Map Pack Boost
+            - generic [ref=e424]: aimasterz.com SEO
+          - paragraph [ref=e425]: We ran our own local SEO playbook. Search 'AI for SMBs Bellevue' and find us.
+        - 'generic "Status: Live" [ref=e426]': Live
+  - generic [ref=e428]:
+    - generic [ref=e429]:
+      - generic [ref=e431]: Three tiers
+      - heading "Pick a tier. We build it. We run it." [level=2] [ref=e434]
+      - paragraph [ref=e436]: Setup gets you live on your own infrastructure in 7 to 30 days. Monthly retainer covers Quality Loop optimization, vendor management, and the SLA. You own everything we build.
+    - generic [ref=e437]:
+      - generic [ref=e439]:
+        - generic [ref=e440]:
+          - generic [ref=e441]: 🌱 Foundation
+          - heading "Foundation" [level=3] [ref=e442]
+          - paragraph [ref=e443]: Branded website + AI capture stack
+        - generic [ref=e444]:
+          - generic [ref=e445]:
+            - generic [ref=e446]: $5,000
+            - generic [ref=e447]: setup
+          - generic [ref=e449]: + $1,200/mo
+          - paragraph [ref=e450]: 7 calendar day setup · ~$1,205-$1,215 (us $1,200 + Google Cloud ~$5-15)
+        - generic [ref=e451]:
+          - paragraph [ref=e452]: Best for
+          - paragraph [ref=e453]: Solo practices and small clinics getting started with AI
+        - list "Foundation services" [ref=e454]:
+          - listitem [ref=e455]:
+            - img [ref=e457]
+            - generic [ref=e459]:
+              - generic [ref=e460]: AI Lead Capture
+              - generic [ref=e461]: Form with HOT/WARM/COLD scoring
+          - listitem [ref=e462]:
+            - img [ref=e464]
+            - generic [ref=e466]:
+              - generic [ref=e467]: AI Chat Widget
+              - generic [ref=e468]: Trained on your services, hours, pricing
+          - listitem [ref=e469]:
+            - img [ref=e471]
+            - generic [ref=e473]:
+              - generic [ref=e474]: Strategy Audit Page
+              - generic [ref=e475]: The audit landing page from outreach, hosted on your site
+          - listitem [ref=e476]:
+            - img [ref=e478]
+            - generic [ref=e480]:
+              - generic [ref=e481]: Smile Simulator
+              - generic [ref=e482]: Gemini-powered before/after visualizer
+        - link "Book a 20-min call" [ref=e484] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e485]
+      - generic [ref=e487]:
+        - generic [ref=e489]:
+          - img [ref=e490]
+          - text: Most Popular
+        - generic [ref=e493]:
+          - generic [ref=e494]:
+            - generic [ref=e495]: 🚀 Growth
+            - heading "Growth" [level=3] [ref=e496]
+            - paragraph [ref=e497]: Everything in Foundation + after-hours capture + social
+          - generic [ref=e498]:
+            - generic [ref=e499]:
+              - generic [ref=e500]: $10,000
+              - generic [ref=e501]: setup
+            - generic [ref=e503]: + $2,500/mo
+            - paragraph [ref=e504]: 14 calendar day setup · ~$2,560 (us $2,500 + Google ~$30-50 + Supabase Pro $25)
+          - generic [ref=e505]:
+            - paragraph [ref=e506]: Best for
+            - paragraph [ref=e507]: Practices ready to capture after-hours leads and scale review/social
+          - list "Growth services" [ref=e508]:
+            - listitem [ref=e509]:
+              - img [ref=e511]
+              - generic [ref=e513]:
+                - generic [ref=e514]: AI Lead Capture
+                - generic [ref=e515]: Form with HOT/WARM/COLD scoring
+            - listitem [ref=e516]:
+              - img [ref=e518]
+              - generic [ref=e520]:
+                - generic [ref=e521]: AI Chat Widget
+                - generic [ref=e522]: Trained on your services, hours, pricing
+            - listitem [ref=e523]:
+              - img [ref=e525]
+              - generic [ref=e527]:
+                - generic [ref=e528]: Strategy Audit Page
+                - generic [ref=e529]: The audit landing page from outreach, hosted on your site
+            - listitem [ref=e530]:
+              - img [ref=e532]
+              - generic [ref=e534]:
+                - generic [ref=e535]: Smile Simulator
+                - generic [ref=e536]: Gemini-powered before/after visualizer
+            - listitem [ref=e537]:
+              - img [ref=e539]
+              - generic [ref=e541]:
+                - generic [ref=e542]: AI Receptionist
+                - generic [ref=e543]: Answers calls 24/7, books appointments, hot-transfer to staff
+            - listitem [ref=e544]:
+              - img [ref=e546]
+              - generic [ref=e548]:
+                - generic [ref=e549]: Review Automation
+                - generic [ref=e550]: Post-visit review requests, sentiment routing, GBP sync
+            - listitem [ref=e551]:
+              - img [ref=e553]
+              - generic [ref=e555]:
+                - generic [ref=e556]: Social Autopilot
+                - generic [ref=e557]: 3 posts/week on X, LinkedIn, IG with competitive framing
+            - listitem [ref=e558]:
+              - img [ref=e560]
+              - generic [ref=e562]:
+                - generic [ref=e563]: Newsletter
+                - generic [ref=e564]: Monthly digest to your patient list
+          - link "Book a 20-min call" [ref=e566] [cursor=pointer]:
+            - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+            - text: Book a 20-min call
+            - img [ref=e567]
+      - generic [ref=e570]:
+        - generic [ref=e571]:
+          - generic [ref=e572]: 🏥 Practice OS
+          - heading "Practice OS" [level=3] [ref=e573]
+          - paragraph [ref=e574]: "Full operational AI: PMS sync, insurance verify, content engine"
+        - generic [ref=e575]:
+          - generic [ref=e576]:
+            - generic [ref=e577]: $25,000
+            - generic [ref=e578]: setup
+          - generic [ref=e580]: + $5,000/mo
+          - paragraph [ref=e581]: 30 calendar day setup · ~$5,100-$5,200 (us $5,000 + vendor + Google + Supabase)
+        - generic [ref=e582]:
+          - paragraph [ref=e583]: Best for
+          - paragraph [ref=e584]: Multi-op practices wanting AI integrated into their PMS workflow
+        - list "Practice OS services" [ref=e585]:
+          - listitem [ref=e586]:
+            - img [ref=e588]
+            - generic [ref=e590]:
+              - generic [ref=e591]: AI Lead Capture
+              - generic [ref=e592]: Form with HOT/WARM/COLD scoring
+          - listitem [ref=e593]:
+            - img [ref=e595]
+            - generic [ref=e597]:
+              - generic [ref=e598]: AI Chat Widget
+              - generic [ref=e599]: Trained on your services, hours, pricing
+          - listitem [ref=e600]:
+            - img [ref=e602]
+            - generic [ref=e604]:
+              - generic [ref=e605]: Strategy Audit Page
+              - generic [ref=e606]: The audit landing page from outreach, hosted on your site
+          - listitem [ref=e607]:
+            - img [ref=e609]
+            - generic [ref=e611]:
+              - generic [ref=e612]: Smile Simulator
+              - generic [ref=e613]: Gemini-powered before/after visualizer
+          - listitem [ref=e614]:
+            - img [ref=e616]
+            - generic [ref=e618]:
+              - generic [ref=e619]: AI Receptionist
+              - generic [ref=e620]: Answers calls 24/7, books appointments, hot-transfer to staff
+          - listitem [ref=e621]:
+            - img [ref=e623]
+            - generic [ref=e625]:
+              - generic [ref=e626]: Review Automation
+              - generic [ref=e627]: Post-visit review requests, sentiment routing, GBP sync
+          - listitem [ref=e628]:
+            - img [ref=e630]
+            - generic [ref=e632]:
+              - generic [ref=e633]: Social Autopilot
+              - generic [ref=e634]: 3 posts/week on X, LinkedIn, IG with competitive framing
+          - listitem [ref=e635]:
+            - img [ref=e637]
+            - generic [ref=e639]:
+              - generic [ref=e640]: Newsletter
+              - generic [ref=e641]: Monthly digest to your patient list
+          - listitem [ref=e642]:
+            - img [ref=e644]
+            - generic [ref=e646]:
+              - generic [ref=e647]: Patient Comms + PMS Sync
+              - generic [ref=e648]: Dentrix/Eaglesoft/Open Dental sync, reminders, recall, payments
+          - listitem [ref=e649]:
+            - img [ref=e651]
+            - generic [ref=e653]:
+              - generic [ref=e654]: Insurance Verify
+              - generic [ref=e655]: Real-time eligibility check at booking
+          - listitem [ref=e656]:
+            - img [ref=e658]
+            - generic [ref=e660]:
+              - generic [ref=e661]: Blog Content Engine
+              - generic [ref=e662]: 4 SEO posts/month, briefs auto-generated
+          - listitem [ref=e663]:
+            - img [ref=e665]
+            - generic [ref=e667]:
+              - generic [ref=e668]: Case Study Videos
+              - generic [ref=e669]: Avatar studio video, 1 per quarter
+          - listitem [ref=e670]:
+            - img [ref=e672]
+            - generic [ref=e674]:
+              - generic [ref=e675]: Meeting Notes AI
+              - generic [ref=e676]: Auto-transcribe + summarize internal meetings
+          - listitem [ref=e677]:
+            - img [ref=e679]
+            - generic [ref=e681]:
+              - generic [ref=e682]: Knowledge Base AI
+              - generic [ref=e683]: Internal docs powered by AI search
+        - link "Book a 20-min call" [ref=e685] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - text: Book a 20-min call
+          - img [ref=e686]
+    - paragraph [ref=e689]:
+      - strong [ref=e690]: You own the source code.
+      - text: Customer owns the Firebase project, Supabase database, and Google Workspace. We have admin access to operate the services. Cancel anytime with 30 days notice; we hand off everything cleanly.
+  - generic [ref=e692]:
+    - generic [ref=e693]:
+      - generic [ref=e695]: How it works
+      - heading "From interested to live in 5 days" [level=2] [ref=e698]
+      - paragraph [ref=e700]: No discovery sprints. No onboarding marathons. Productized services deploy fast.
+    - generic [ref=e701]:
+      - generic [ref=e704]:
+        - generic [ref=e706]:
+          - img [ref=e708]
+          - generic [ref=e713]: "01"
+        - generic [ref=e714]:
+          - generic [ref=e715]:
+            - heading "Free 15-min audit call" [level=3] [ref=e716]
+            - generic [ref=e717]: Day 1
+          - paragraph [ref=e718]: We look at your current site, tools, and pipeline. No prep required. We tell you the top 2-3 AI wins for your business.
+      - generic [ref=e721]:
+        - generic [ref=e723]:
+          - img [ref=e725]
+          - generic [ref=e730]: "02"
+        - generic [ref=e731]:
+          - generic [ref=e732]:
+            - heading "Pick a service or bundle" [level=3] [ref=e733]
+            - generic [ref=e734]: Day 1-2
+          - paragraph [ref=e735]: Choose a single product from Lane A or a full industry bundle from Lane B. Fixed price, no negotiation needed.
+      - generic [ref=e738]:
+        - generic [ref=e740]:
+          - img [ref=e742]
+          - generic [ref=e745]: "03"
+        - generic [ref=e746]:
+          - generic [ref=e747]:
+            - heading "We set it up" [level=3] [ref=e748]
+            - generic [ref=e749]: 5 days
+          - paragraph [ref=e750]: 5 business days for productized services. 2 weeks for custom builds. We handle everything — no engineers required on your end.
+      - generic [ref=e752]:
+        - generic [ref=e754]:
+          - img [ref=e756]
+          - generic [ref=e760]: "04"
+        - generic [ref=e761]:
+          - generic [ref=e762]:
+            - heading "You see results within 30 days" [level=3] [ref=e763]
+            - generic [ref=e764]: Ongoing
+          - paragraph [ref=e765]: Leads captured, appointments booked, content publishing, reviews flowing. If you do not see results within 30 days, we refund — no questions asked.
+    - paragraph [ref=e768]:
+      - text: Every engagement carries a
+      - strong [ref=e769]: 30-day cancellation window
+      - text: . You own the source code, the Firebase project, and the Supabase database from day one. We provide
+      - strong [ref=e770]: a clean handoff with all credentials
+      - text: if you ever leave.
+    - link "Book the free audit call" [ref=e772] [cursor=pointer]:
+      - /url: "#contact"
+      - text: Book the free audit call
+      - img [ref=e773]
+  - generic [ref=e776]:
+    - generic [ref=e777]:
+      - generic [ref=e779]: Why SMBs choose AIMasterz
+      - heading "Honest over fabricated" [level=2] [ref=e782]
+      - paragraph [ref=e784]: We are early. You would be in the first customers. That means you get Hussain personally setting things up, not an offshore team following a playbook.
+    - blockquote [ref=e786]:
+      - img [ref=e787]
+      - paragraph [ref=e790]:
+        - text: I built the wseller outbound tool for dental practices and generated 77 site previews in a single week — each one a custom AI-built site for a real dental practice in the Pacific Northwest. That is when I knew the product was real.
+        - text: SMBs do not need enterprise software. They need one tool that solves one problem, set up by someone who actually knows what they are doing. That is what AIMasterz is. I build each implementation personally from Bellevue, WA.
+      - generic [ref=e791]:
+        - generic [ref=e792]: H
+        - generic [ref=e793]:
+          - paragraph [ref=e794]: Hussain Sehorewala
+          - paragraph [ref=e795]: Founder, AIMasterz LLC — Bellevue, WA
+    - generic [ref=e797]:
+      - paragraph [ref=e798]: Customer stories coming soon
+      - paragraph [ref=e799]: We are in early rollout. The 77 sites in our portfolio are dental prospect previews — not yet paying customers. We are onboarding first clients now. You would be among the first 10.
+      - link "Become a founding customer" [ref=e800] [cursor=pointer]:
+        - /url: "#contact"
+        - text: Become a founding customer
+        - img [ref=e801]
+  - generic [ref=e804]:
+    - generic [ref=e805]:
+      - generic [ref=e807]: Get started
+      - heading "Ready to add AI to your business?" [level=2] [ref=e810]
+      - paragraph [ref=e812]: Tell us a bit about your business. Hussain will reply within 4 hours.
+    - generic [ref=e813]:
+      - generic [ref=e815]:
+        - link "Schedule a free audit call 15 min · Calendly Book now" [ref=e816] [cursor=pointer]:
+          - /url: https://calendar.app.google/qHoABaJcR3b4YQkM8
+          - img [ref=e818]
+          - generic [ref=e820]:
+            - paragraph [ref=e821]: Schedule a free audit call
+            - paragraph [ref=e822]: 15 min · Calendly
+          - generic [ref=e823]: Book now
+        - link "Email us admin@aimasterz.com Send email" [ref=e824] [cursor=pointer]:
+          - /url: mailto:admin@aimasterz.com
+          - img [ref=e826]
+          - generic [ref=e829]:
+            - paragraph [ref=e830]: Email us
+            - paragraph [ref=e831]: admin@aimasterz.com
+          - generic [ref=e832]: Send email
+        - generic [ref=e834]:
+          - img [ref=e835]
+          - generic [ref=e838]:
+            - paragraph [ref=e839]: AIMasterz LLC
+            - paragraph [ref=e840]: Bellevue, WA
+            - paragraph [ref=e841]: Built in Washington State
+      - generic [ref=e844]:
+        - generic [ref=e845]:
+          - generic [ref=e846]: Your name
+          - textbox "Your name" [ref=e847]:
+            - /placeholder: Jane Smith
+        - generic [ref=e848]:
+          - generic [ref=e849]: Email
+          - textbox "Email" [ref=e850]:
+            - /placeholder: jane@yourbusiness.com
+        - generic [ref=e851]:
+          - generic [ref=e852]: Business type
+          - combobox "Business type" [ref=e853]:
+            - option "Select your industry" [selected]
+            - option "Dental"
+            - option "Law"
+            - option "Real Estate"
+            - option "Med Spa"
+            - option "Restaurant"
+            - option "Service Trade"
+            - option "Other"
+        - generic [ref=e854]:
+          - generic [ref=e855]: What do you want to solve?
+          - textbox "What do you want to solve?" [ref=e856]:
+            - /placeholder: e.g. Need more leads for my dental practice
+        - button "Send message" [ref=e857] [cursor=pointer]:
+          - text: Send message
+          - img [ref=e858]
+        - paragraph [ref=e861]:
+          - text: By submitting, you agree to our
+          - link "Privacy Policy" [ref=e862] [cursor=pointer]:
+            - /url: /privacy
+          - text: . No spam — ever.
+  - generic "Site footer" [ref=e863]:
+    - generic [ref=e865]:
+      - paragraph [ref=e866]: Three-tier retainer. You own the source code, Firebase project, and Supabase database. 30-day cancellation with clean handoff.
+      - link "See all guarantees" [ref=e867] [cursor=pointer]:
+        - /url: /#pricing
+        - text: See all guarantees
+        - img [ref=e868]
+    - generic [ref=e872]:
+      - heading "AI tips for SMB owners — monthly, free" [level=3] [ref=e873]
+      - paragraph [ref=e874]: "Real tactics: what we built this month, what worked, what did not. Drafted by our own Content Engine."
+      - generic [ref=e875]:
+        - generic [ref=e876]: Email address
+        - textbox "Email address" [ref=e877]:
+          - /placeholder: your@email.com
+        - button "Subscribe" [ref=e878] [cursor=pointer]
+    - generic [ref=e880]:
+      - generic [ref=e881]:
+        - link "AIMasterz home" [ref=e882] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e883]:
+            - img "AIMasterz Logo" [ref=e887]
+            - generic [ref=e889]: AIMasterz
+        - paragraph [ref=e890]: Productized AI services for small and medium businesses. Fixed prices. No retainers. Built in Bellevue, WA by Hussain Sehorewala.
+        - generic [ref=e891]:
+          - text: Bellevue, WA
+          - link "admin@aimasterz.com" [ref=e892] [cursor=pointer]:
+            - /url: mailto:admin@aimasterz.com
+        - list "Social links" [ref=e893]:
+          - listitem "Twitter / X" [ref=e894] [cursor=pointer]:
+            - img [ref=e895]
+          - listitem "LinkedIn" [ref=e897] [cursor=pointer]:
+            - img [ref=e898]
+          - listitem "GitHub" [ref=e902] [cursor=pointer]:
+            - img [ref=e903]
+      - generic [ref=e906]:
+        - heading "Services" [level=4] [ref=e907]
+        - list [ref=e908]:
+          - listitem [ref=e909]:
+            - link "AI Receptionist" [ref=e910] [cursor=pointer]:
+              - /url: /#dental-ai-stack
+          - listitem [ref=e911]:
+            - link "AI Chat Widget" [ref=e912] [cursor=pointer]:
+              - /url: /#dental-ai-stack
+          - listitem [ref=e913]:
+            - link "Review Automation" [ref=e914] [cursor=pointer]:
+              - /url: /#dental-ai-stack
+          - listitem [ref=e915]:
+            - link "Smile Simulator" [ref=e916] [cursor=pointer]:
+              - /url: /#dental-ai-stack
+          - listitem [ref=e917]:
+            - link "Social Autopilot" [ref=e918] [cursor=pointer]:
+              - /url: /#dental-ai-stack
+          - listitem [ref=e919]:
+            - link "See all tiers" [ref=e920] [cursor=pointer]:
+              - /url: /#pricing
+      - generic [ref=e921]:
+        - heading "Company" [level=4] [ref=e922]
+        - list [ref=e923]:
+          - listitem [ref=e924]:
+            - link "Work (77 sites)" [ref=e925] [cursor=pointer]:
+              - /url: /#portfolio
+          - listitem [ref=e926]:
+            - link "Guides Library" [ref=e927] [cursor=pointer]:
+              - /url: /guides
+          - listitem [ref=e928]:
+            - link "How it works" [ref=e929] [cursor=pointer]:
+              - /url: /#process
+          - listitem [ref=e930]:
+            - link "Pricing" [ref=e931] [cursor=pointer]:
+              - /url: /#pricing
+          - listitem [ref=e932]:
+            - link "Free AI Audit" [ref=e933] [cursor=pointer]:
+              - /url: /audit
+          - listitem [ref=e934]:
+            - link "Contact" [ref=e935] [cursor=pointer]:
+              - /url: /#contact
+      - generic [ref=e936]:
+        - heading "Legal" [level=4] [ref=e937]
+        - list [ref=e938]:
+          - listitem [ref=e939]:
+            - link "Privacy Policy" [ref=e940] [cursor=pointer]:
+              - /url: /privacy
+          - listitem [ref=e941]:
+            - link "Terms of Service" [ref=e942] [cursor=pointer]:
+              - /url: /terms
+          - listitem [ref=e943]:
+            - link "Refund Policy" [ref=e944] [cursor=pointer]:
+              - /url: /refund
+    - generic [ref=e947]:
+      - paragraph [ref=e948]: © 2026 AIMasterz LLC. All rights reserved.
+      - generic [ref=e949]: Systems operational
+  - button "Open chat with AIMasterz AI" [ref=e953] [cursor=pointer]:
+    - img [ref=e954]
+    - generic [ref=e957]: "1"

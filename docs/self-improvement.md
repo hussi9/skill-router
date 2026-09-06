@@ -14,12 +14,26 @@ and it runs every Monday at 9am.
 
 ## The feedback loop
 
-Every session, two log files grow:
+Every session, these log/state files grow:
 
 | File | Written by | Contains |
 |---|---|---|
 | `~/.claude/skill_router_log.jsonl` | router (via hooks) | chain-start, chain-step, chain-end events |
 | `~/.claude/skill_usage.log` | PostToolUse hook | every `Skill()` tool invocation |
+| `~/.claude/skill_router_strikes.json` | router | per-skill *silent miss* tally (announced, never invoked) |
+| `~/.claude/skill_router_overrides_count.json` | `router_override.py` | per-skill *reasoned override* tally |
+| `~/.claude/skill_router_overrides.jsonl` | `router_override.py` | append-only audit: `{ts, skill, reason}` per override |
+
+There are two demotion signals, both self-tuning and both reset by a successful invoke:
+
+- **Strikes** (passive) — the model *silently* ignored an announced skill. At
+  `STRIKE_THRESHOLD` misses the skill goes soft (dropped from announcements).
+- **Reasoned overrides** (active, the ask+learn loop) — the model ran
+  `scripts/router_override.py "<reason>"` to overrule a route and *said why*. A reasoned
+  "this is wrong" is a stronger signal than a silent miss, so it carries its own
+  `OVERRIDE_THRESHOLD`. The `reason` strings are the highest-value tuning data: grep
+  `skill_router_overrides.jsonl` to see *why* a skill keeps getting rejected and fix the
+  triage pattern at the source instead of just suppressing it.
 
 The three analysis scripts read these logs and surface three things:
 
