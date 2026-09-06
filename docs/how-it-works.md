@@ -2,27 +2,34 @@
 
 # How It Works
 
-> **TL;DR:** Triage → check for saved chain → look up routing-table row → upgrade via catalog check → announce → dispatch with per-step model + thinking depth. ~5 seconds of routing thought before any tool fires.
-
-Every non-trivial task runs through 4 steps before any tool fires.
+> **TL;DR:** Project route → triage → routing table → rank the full catalog for a specialist → announce → dispatch. Runs as a hook on every prompt, in about 120ms.
 
 ```
 You type a task
      │
      ▼
-[1] Triage         BROKEN / BUILD / OPERATE
+[0] Project route?  a trigger in SKILL.personal.md that means exactly one
+     │ no           project ("@economicalai", "testflight") → use its skill
+     ▼
+[1] Triage          BROKEN / BUILD / OPERATE — or SKIP, which is silence
      │
      ▼
-[2] Named chain?   if SKILL.personal.md has a saved chain matching this task → use it
-     │ no
-     ▼
-[3] Routing table  pick Skill + Agent + Model from the table for this path
+[2] Routing table   Skill + Agent + Thinking for this path
      │
      ▼
-[4] Catalog check  any installed skill more specific than the generic one?
-     │
+[3] Specialist      rank all ~395 invokable skills against the prompt;
+     │              append one advisory line when one clearly fits
      ▼
-Announce → dispatch
+Announce → dispatch → (sub-agents get their own brief at SubagentStart)
+```
+
+**Before anything else, check it is alive.** Routing runs from hooks in
+`settings.json`. If those go missing — a botched upgrade, a hand-edit, a
+restored backup — every part of this pipeline still passes its own tests while
+routing does nothing at all. That happened here for roughly three months.
+
+```bash
+python3 scripts/doctor.py
 ```
 
 ## 1. Triage
@@ -59,29 +66,65 @@ Each path has a table mapping signals to a `Skill + Agent + Model` triple:
 
 Model selection is *part of routing*, not a separate decision. `haiku` for trivial reads, `opus` for production incidents, `sonnet` for everything else.
 
-### How model selection is actually enforced
+### The model column is `inherit`
 
-The parent Claude Code session can't hot-swap models mid-turn — there's no API for "now run this turn at sonnet." So the router uses a simple rule:
+The parent session can't hot-swap models mid-turn, so "which model" and
+"in-session or dispatched" are the same decision:
 
-- **Step's model matches parent session model** → invoke the Skill in-session (cheaper, same context).
-- **Step's model differs from parent** → dispatch via the `Agent` tool with `subagent_type` and `model` set explicitly. The subagent runs at the right model independent of the parent.
+- **`inherit`** → invoke the Skill in-session, at whatever model you chose.
+- **anything else** → dispatch via `Agent` with `model` set explicitly.
 
-For a multi-domain chain, every step that needs a non-parent model goes through `Agent`. The parent does light orchestration only; the heavy work happens at the right model. This typically nets a 30-50% cost reduction on chains with mixed complexity (e.g. `haiku` reads + `sonnet` writes + `opus` review).
+The table used to name `sonnet` on most rows. That was written when the parent
+was always Sonnet, so `sonnet` quietly meant `inherit`. It stopped meaning
+that: on a Fable or Opus session every routed step read as "different model"
+and got fanned out to a sub-agent running something *weaker* than the model you
+are paying for — dispatch overhead purchased at a quality discount.
+
+Depth is expressed by `Thinking` instead, which composes with any model.
+`haiku` survives as the one deliberate downgrade, for bulk read-only scans
+whose output is a list of file paths rather than a judgment.
 
 Full protocol: [`SKILL.md`](../SKILL.md) "DISPATCH PROTOCOL" section.
 
-## 4. Catalog check
+## 3. Specialist layer
 
-If the table returns a generic skill (e.g. `integration-specialist`), the router searches local + remote catalogs for a more specific match. If you have `stripe-automation` installed, it wins over the generic.
+The tables name ~20 process skills. This machine has ~395 invokable ones. The
+other ~375 are the domain specialists that make a task go faster, and no table
+can enumerate them — so the router ranks the whole catalog against the prompt
+and appends at most one advisory line.
 
 ```
-~/.claude/skills/         → your custom + installed
-~/.agent/skills/          → 1,400+ Antigravity skills
-~/.composio-skills/       → 940+ Composio integrations
-remote known repos        → 4 curated GitHub catalogs (see references/known-skill-repos.md)
+~/.claude/skills/        invokable — your own
+~/.claude/commands/      invokable — slash-commands
+plugins/cache/           invokable — newest version of each plugin
+(built into the binary)  invokable — code-review, dataviz, security-review, …
+~/.agent/skills/         NOT invokable — install candidates only
+~/.composio-skills/      NOT invokable — install candidates only
 ```
 
-This is why people install once and keep it: new skills published tomorrow get used tomorrow, no manual table edits.
+That last distinction matters: announcing a skill the `Skill` tool cannot load
+deadlocks the IRON RULE on a call that can never succeed, so non-invokable
+skills are catalogued but never routed to.
+
+Ranking is BM25-style over names and descriptions, pure stdlib, about 5ms. It
+replaced a local embedding daemon that needed fastembed, ONNX, an 80-second
+corpus build and a live Unix socket — and that had been dead for months,
+taking the entire semantic layer down with it silently.
+
+The catalog rebuilds at every `SessionStart`, so a skill you install today is
+routable today.
+
+## 4. Sub-agents
+
+Routing used to stop at the session boundary: the parent got an announcement,
+and a dispatched agent got nothing — so the half of the work actually editing
+files ran skill-blind. A `SubagentStart` hook now briefs each agent on the
+skills that fit its job, hand-paired in `agent_skills.json` or derived by
+ranking the agent's own description.
+
+Enforcement deliberately does *not* follow. The parent's pending skill belongs
+to the parent's turn and a sub-agent cannot satisfy it, so the IRON RULE stands
+down when it sees an `agent_id`.
 
 ## What gets announced
 
@@ -135,13 +178,16 @@ Source data: `~/.claude/skill_usage.log` (per-skill firings) + `~/.claude/skill_
 2. **Deterministic.** Same input → same output. No vibes.
 3. **Fail-safe.** Ambiguous → higher-complexity path.
 4. **Living.** Catalog check picks up newly-installed skills automatically.
-5. **One file.** ~265 lines of routing logic, no build step, no dependencies.
+5. **No dependencies.** Pure stdlib, no build step, no daemon. Every added
+   moving part is another thing that can die quietly.
+6. **Observable.** `doctor.py` answers "is this actually running?" — the
+   question every other check assumed.
 
 ## What it doesn't do
 
 | Doesn't | Why |
 |---|---|
 | Manage skill lifecycles (create/improve) | That's [zysilm/skill-master](https://github.com/zysilm/skill-master)'s job — different product, complementary |
-| Learn from past sessions automatically | Substrate exists (`~/.claude/skill_usage.log`); shipping manual named chains first |
+| Learn from past sessions automatically | Substrate exists (`~/.claude/skill_usage.log`); `learn-from-history.py` reports, a human decides |
 | Provide a UI / dashboard | The statusline integration is the UI |
 | Enforce policy across a team | This is a power-user tool, not enterprise governance |
