@@ -17,7 +17,8 @@ Six checks, ordered by how badly each one silences routing:
   4. catalog fresh        a stale catalog cannot route to newly installed skills
   5. deferrals sane       demotions must expire; permanent ones kill routing
   6. agents follow you    a pinned sub-agent model downgrades every dispatch
-  7. it actually routes   end-to-end, through the real entry point
+  7. agents register      a file without frontmatter is invisible, not broken
+  8. it actually routes   end-to-end, through the real entry point
 
 Exit 0 when everything passes, 1 when any check fails. Safe to run any time.
 
@@ -79,11 +80,27 @@ def load_settings() -> dict:
 
 
 def check_hooks(r: Report) -> None:
+    """Are the router's hooks wired into settings.json?
+
+    Detection is by the script each hook runs, not by our `_skill_router`
+    marker key. A config normalizer on this machine strips unknown
+    underscore-prefixed keys from settings.json — caught live, it removed the
+    markers while leaving the hook commands working. Checking for the marker
+    would have reported routing as dead when it was fine, which is the same
+    class of false signal this whole tool exists to eliminate.
+    """
+    try:
+        sys.path.insert(0, str(HERE))
+        from install_hooks import _is_ours  # type: ignore[import-not-found]
+    except ImportError:
+        def _is_ours(hook: dict) -> bool:  # type: ignore[misc]
+            return bool(hook.get("_skill_router"))
+
     hooks = load_settings().get("hooks", {})
     installed = {
         event for event in REQUIRED_EVENTS
-        for group in hooks.get(event, [])
-        if isinstance(group, dict) and group.get("_skill_router")
+        for group in hooks.get(event, []) if isinstance(group, dict)
+        for hook in group.get("hooks", []) if isinstance(hook, dict) and _is_ours(hook)
     }
     missing = [e for e in REQUIRED_EVENTS if e not in installed]
     r.check(
@@ -95,14 +112,25 @@ def check_hooks(r: Report) -> None:
     )
 
 
+def _hook_is_ours(hook: dict) -> bool:
+    try:
+        sys.path.insert(0, str(HERE))
+        from install_hooks import _is_ours  # type: ignore[import-not-found]
+        return _is_ours(hook)
+    except ImportError:
+        return bool(hook.get("_skill_router"))
+
+
 def check_hook_scripts(r: Report) -> None:
     hooks = load_settings().get("hooks", {})
     missing: list[str] = []
     for event, groups in hooks.items():
         for group in groups if isinstance(groups, list) else []:
-            if not (isinstance(group, dict) and group.get("_skill_router")):
+            if not isinstance(group, dict):
                 continue
             for hook in group.get("hooks", []):
+                if not (isinstance(hook, dict) and _hook_is_ours(hook)):
+                    continue
                 for token in str(hook.get("command", "")).split():
                     if token.endswith((".py", ".sh")) and "/" in token:
                         if not Path(token).is_file():
@@ -230,6 +258,45 @@ def check_agent_models(r: Report) -> None:
             "python3 scripts/fix_agent_models.py")
 
 
+def check_agents_register(r: Report) -> None:
+    """An agent file with no frontmatter is not a broken agent — it is no agent.
+
+    Claude Code needs `name` and `description` to register a definition, so a
+    file that opens straight at a heading is skipped in silence: it never
+    appears in the dispatchable list and every attempt to use it fails with
+    "agent type not found". Five of this machine's agents sat that way,
+    referenced by name in the /market audit skill and unreachable the whole
+    time. Nothing anywhere reported it, which is exactly why it belongs here.
+    """
+    agents_dir = HOME / ".claude" / "agents"
+    if not agents_dir.is_dir():
+        r.check("agent files register as agents", True, "no agents directory")
+        return
+    try:
+        sys.path.insert(0, str(HERE))
+        from build_catalog import parse_frontmatter  # type: ignore[import-not-found]
+    except ImportError:
+        r.check("agent files register as agents", True, "checker unavailable")
+        return
+
+    unregistered: list[str] = []
+    for path in sorted(agents_dir.glob("*.md")):
+        if path.name.startswith("_"):
+            continue  # shared context and scratch files, not definitions
+        try:
+            fm = parse_frontmatter(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if not fm.get("name") or not fm.get("description"):
+            unregistered.append(path.stem)
+
+    r.check("agent files register as agents", not unregistered,
+            f"{len(unregistered)} invisible: {', '.join(unregistered)}"
+            if unregistered else "every agent file has name + description",
+            "add YAML frontmatter with name and description, or prefix the "
+            "filename with _ if it is not an agent")
+
+
 def check_end_to_end(r: Report) -> None:
     silent: list[str] = []
     for prompt in SMOKE_PROMPTS:
@@ -277,6 +344,7 @@ def main() -> int:
     check_catalog(r)
     check_deferrals(r)
     check_agent_models(r)
+    check_agents_register(r)
     check_end_to_end(r)
 
     if not args.quiet:

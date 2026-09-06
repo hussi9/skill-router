@@ -39,6 +39,27 @@ SCRIPTS = SKILL_DIR / "scripts"
 
 MARKER = "_skill_router"
 
+# Identifying our hooks by the marker alone is not enough. Something on this
+# machine normalizes settings.json and drops unknown underscore-prefixed keys:
+# observed live, `_skill_router` and `_purpose` were stripped while the hook
+# commands themselves survived and kept working. Ownership therefore also has
+# to be recognisable from the command itself, or the next install would append
+# a second copy of every hook beside the unmarked originals.
+OWNED_SCRIPTS = (
+    "skill-router/scripts/router.py",
+    "skill-router/scripts/iron_rule_hook.py",
+    "skill-router/scripts/skill_invoked.py",
+    "skill-router/scripts/subagent_brief.py",
+    "skill-router/scripts/build_catalog.py",
+)
+
+
+def _is_ours(hook_entry: dict) -> bool:
+    if hook_entry.get(MARKER):
+        return True
+    command = hook_entry.get("command")
+    return isinstance(command, str) and any(s in command for s in OWNED_SCRIPTS)
+
 
 def hook(command: str, timeout: int, purpose: str) -> dict:
     return {
@@ -147,6 +168,8 @@ def _is_legacy(hook_entry: dict) -> bool:
     command = hook_entry.get("command")
     if not isinstance(command, str):
         return False
+    if any(s in command for s in OWNED_SCRIPTS):
+        return False  # ours, even without the marker
     return any(frag in command for frag in LEGACY_FRAGMENTS)
 
 
@@ -157,12 +180,13 @@ def strip_managed(groups: list) -> list:
         if not isinstance(group, dict):
             out.append(group)
             continue
-        if group.get(MARKER):
+        if group.get(MARKER) or any(
+                _is_ours(h) for h in group.get("hooks", []) if isinstance(h, dict)):
             continue
         hooks = group.get("hooks")
         if isinstance(hooks, list):
             kept = [h for h in hooks
-                    if not (isinstance(h, dict) and (h.get(MARKER) or _is_legacy(h)))]
+                    if not (isinstance(h, dict) and (_is_ours(h) or _is_legacy(h)))]
             if not kept:
                 continue
             group = {**group, "hooks": kept}
