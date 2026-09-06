@@ -117,6 +117,14 @@ Fable or Opus session was being shipped to a *weaker* model than the user chose.
 Depth now comes from `Thinking`, which composes with any model. Never
 reintroduce a frontier model name into the table.
 
+**The same rule applies to agent frontmatter.** `model: sonnet` in an agent
+file wins over the session, so dispatching to it from an Opus or Fable session
+buys sub-agent overhead at lower capability. Measured on 2.1.263 from an Opus
+parent: a pinned dispatch used `claude-opus-5` *and* `claude-sonnet-5`; an
+`inherit` dispatch used only `claude-opus-5`. `doctor.py` checks this;
+`scripts/fix_agent_models.py` fixes it. `haiku` is exempt — the one deliberate
+downgrade.
+
 ---
 
 ## SPECIALIST LAYER — 400 skills, not 20
@@ -320,6 +328,7 @@ Chain shapes: [`references/multi-domain-chaining.md`](./references/multi-domain-
 | `scripts/doctor.py` | routing feels dead, or after any Claude Code upgrade |
 | `scripts/install_hooks.py` | doctor reports missing hooks |
 | `scripts/build_catalog.py` | you installed a skill and want it routable now |
+| `scripts/fix_agent_models.py` | after adding an agent, so it follows your session model |
 | `scripts/catalog_match.py "<prompt>"` | a specialist suggestion looked wrong |
 | `scripts/learn-from-history.py` | monthly: which announcements get ignored |
 | `python3 -m pytest tests/ -q` | after editing any routing logic |

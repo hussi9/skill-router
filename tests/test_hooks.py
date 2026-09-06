@@ -277,3 +277,50 @@ class TestInstaller(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAgentModels(unittest.TestCase):
+    """Sub-agents must run at the session's model, not one pinned years ago.
+
+    Measured on Claude Code 2.1.263 from an Opus 5 parent session, by reading
+    `modelUsage` out of a headless run rather than asking a model to name
+    itself (self-reports were wrong):
+
+        model: sonnet   ->  claude-opus-5 + claude-sonnet-5   (downgraded)
+        model: inherit  ->  claude-opus-5                     (correct)
+    """
+
+    def setUp(self) -> None:
+        import fix_agent_models  # type: ignore[import-not-found]
+        self.mod = fix_agent_models
+
+    def test_rewrites_only_the_frontmatter_model(self) -> None:
+        text = ("---\nname: x\nmodel: sonnet\ntools: Read\n---\n\n"
+                "Body text mentioning model: sonnet in prose.\n")
+        out = self.mod.retarget(text)
+        self.assertIn("model: inherit", out.split("---")[1])
+        self.assertIn("model: sonnet in prose", out,
+                      "prose outside the frontmatter must not be rewritten")
+
+    def test_leaves_files_without_frontmatter_alone(self) -> None:
+        text = "# Just a heading\n\nmodel: sonnet\n"
+        self.assertEqual(self.mod.retarget(text), text)
+
+    def test_haiku_is_a_deliberate_downgrade_and_is_kept(self) -> None:
+        self.assertIn("haiku", self.mod.KEEP,
+            "haiku is the one intentional downgrade — bulk read-only work")
+
+    def test_live_agents_do_not_override_the_session(self) -> None:
+        agents = Path.home() / ".claude" / "agents"
+        if not agents.is_dir():
+            self.skipTest("no agents directory")
+        pinned = []
+        for path in sorted(agents.glob("*.md")):
+            if path.name.startswith("_"):
+                continue
+            model = self.mod.current_model(path.read_text(encoding="utf-8"))
+            if model and model != "inherit" and model not in self.mod.KEEP:
+                pinned.append(f"{path.stem}={model}")
+        self.assertEqual(pinned, [],
+            "a pinned agent downgrades every dispatch on a stronger session; "
+            "run scripts/fix_agent_models.py")

@@ -16,7 +16,8 @@ Six checks, ordered by how badly each one silences routing:
   3. no ghost targets     an announced skill that can't load deadlocks the rule
   4. catalog fresh        a stale catalog cannot route to newly installed skills
   5. deferrals sane       demotions must expire; permanent ones kill routing
-  6. it actually routes   end-to-end, through the real entry point
+  6. agents follow you    a pinned sub-agent model downgrades every dispatch
+  7. it actually routes   end-to-end, through the real entry point
 
 Exit 0 when everything passes, 1 when any check fails. Safe to run any time.
 
@@ -187,6 +188,48 @@ def check_deferrals(r: Report) -> None:
             "python3 scripts/doctor.py --reset-deferrals")
 
 
+def check_agent_models(r: Report) -> None:
+    """Sub-agents must run at the session's model, not one pinned in 2025.
+
+    Same fault as the routing table's old model column, in a different file:
+    `model: sonnet` in agent frontmatter wins over the session, so every
+    dispatch on an Opus or Fable session pays sub-agent overhead for lower
+    capability. Measured here on 2.1.263: a pinned dispatch reported both
+    claude-opus-5 and claude-sonnet-5; an `inherit` dispatch reported only
+    claude-opus-5.
+
+    `haiku` is exempt — the deliberate downgrade for bulk read-only work.
+    """
+    agents_dir = HOME / ".claude" / "agents"
+    if not agents_dir.is_dir():
+        r.check("sub-agents follow the session model", True, "no agents directory")
+        return
+    try:
+        sys.path.insert(0, str(HERE))
+        import fix_agent_models  # type: ignore[import-not-found]
+    except ImportError:
+        r.check("sub-agents follow the session model", True,
+                "checker unavailable — skipped")
+        return
+
+    pinned: list[str] = []
+    for path in sorted(agents_dir.glob("*.md")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            model = fix_agent_models.current_model(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if model and model not in fix_agent_models.KEEP and model != "inherit":
+            pinned.append(f"{path.stem}={model}")
+
+    r.check("sub-agents follow the session model", not pinned,
+            f"{len(pinned)} pinned: {', '.join(pinned[:6])}"
+            + ("…" if len(pinned) > 6 else "")
+            if pinned else "no agent overrides the session model",
+            "python3 scripts/fix_agent_models.py")
+
+
 def check_end_to_end(r: Report) -> None:
     silent: list[str] = []
     for prompt in SMOKE_PROMPTS:
@@ -233,6 +276,7 @@ def main() -> int:
     check_no_ghosts(r)
     check_catalog(r)
     check_deferrals(r)
+    check_agent_models(r)
     check_end_to_end(r)
 
     if not args.quiet:
