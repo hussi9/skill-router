@@ -34,8 +34,14 @@ _V3_ENV = {
     "SKILL_ROUTER_NO_INDEX": "1",
     "SKILL_ROUTER_LLM": "0",
     "SKILL_ROUTER_SESSION_DIR": tempfile.mkdtemp(prefix="router-session-"),
+    # Hook-mode tests below call main(); without this they write real
+    # announcements into ~/.claude/skill_router_log.jsonl that nothing
+    # follows, and the learner reads those as routes you ignored.
+    "SKILL_ROUTER_NO_LEARN": "1",
 }
-os.environ.update(_V3_ENV)
+# Applied in setUpModule only — never at import. pytest imports every test
+# module during collection, so an import-time update here would switch
+# learning off for test_hooks.py, which runs first and asserts logging.
 
 
 def setUpModule() -> None:
@@ -65,6 +71,7 @@ router.OVERRIDES_LOG = Path(_STATE) / "overrides.jsonl"
 # a rescue would pass or fail depending on what the user did last week.
 router.HISTORY = Path(_STATE) / "learned.json"
 router.LEARNED = router.HISTORY
+router.LOG = Path(_STATE) / "log.jsonl"          # belt and braces with NO_LEARN
 router.HISTORY.write_text("{}\n")
 router._load_history.cache_clear()
 for _f in (router.PENDING, router.STRIKES, router.OVERRIDES_COUNT):
@@ -73,6 +80,10 @@ for _f in (router.PENDING, router.STRIKES, router.OVERRIDES_COUNT):
 
 def tearDownModule() -> None:
     shutil.rmtree(_STATE, ignore_errors=True)
+    # Do not leak this module's env into the next test file: test_hooks.py
+    # asserts that skill_invoked.py logs when learning is *on*.
+    for k in _V3_ENV:
+        os.environ.pop(k, None)
 
 
 # ---- Ground truth from run_routing_test.sh ---------------------------------
@@ -988,6 +999,8 @@ class TestLoggingIsHookModeOnly(unittest.TestCase):
             "prompt": "refactor the auth module",
             "session_id": "sess-1", "prompt_id": "pid-1"})
         os.environ["SKILL_ROUTER_HOOK_MODE"] = "1"
+        # Learning on for this one test: the log is redirected to a temp file.
+        saved_no_learn = os.environ.pop("SKILL_ROUTER_NO_LEARN", None)
         try:
             with redirect_stdout(io.StringIO()):
                 router.main()
@@ -1003,6 +1016,8 @@ class TestLoggingIsHookModeOnly(unittest.TestCase):
             self.assertIn("refactor", prompt_event["tokens"])
             self.assertNotIn("the", prompt_event["tokens"], "keywords only, never prose")
         finally:
+            if saved_no_learn is not None:
+                os.environ["SKILL_ROUTER_NO_LEARN"] = saved_no_learn
             router.LOG = real_log
             os.environ.pop("CLAUDE_USER_INPUT", None)
             os.environ.pop("SKILL_ROUTER_HOOK_MODE", None)

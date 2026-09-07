@@ -1347,6 +1347,11 @@ def log_chain(path: str, chain: list[Step], domains: list[str],
               meta: Optional[dict] = None) -> None:
     if path == "SKIP" or not chain:
         return
+    # Same guard as log_prompt_event: a test or a smoke probe that runs in
+    # hook mode must not write an announcement nothing will ever follow —
+    # the learner would read it as one you ignored.
+    if os.environ.get("SKILL_ROUTER_NO_LEARN") == "1":
+        return
     meta = meta or {}
     LOG.parent.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
