@@ -34,6 +34,11 @@ os.environ.setdefault("SKILL_ROUTER_NO_EMBED", "1")
 
 import router  # type: ignore[import-not-found]
 
+# The integration specialist can be archived or uninstalled underneath these
+# fixtures. The router's contract in that state is to degrade to the generic
+# plan step, not to go silent — so the expectation follows what is installed.
+_INTEGRATION = "connect-apps" if router.valid_skill("connect-apps") else "writing-plans"
+
 # Calibration measures the routing logic, not whatever demotions this machine
 # happens to be carrying today. Without this, a demoted skill silently turns
 # into a "miss" and the score reports a routing regression that is really a
@@ -90,11 +95,11 @@ CASES: list[Case] = [
     Case("Build a new REST API endpoint for user analytics", "BUILD", "feature-dev"),
     Case("create a new endpoint for fetching invoices", "BUILD", "feature-dev"),
     Case("new graphql schema for the chat product", "BUILD", "writing-plans"),
-    Case("integrate Stripe payments into checkout", "BUILD", "connect-apps"),
-    Case("integrate Slack notifications", "BUILD", "connect-apps"),
-    Case("add Twilio SMS to the order flow", "BUILD", "connect-apps"),
-    Case("integrate Plaid bank linking", "BUILD", "connect-apps"),
-    Case("connect Resend for transactional emails", "BUILD", "connect-apps"),
+    Case("integrate Stripe payments into checkout", "BUILD", _INTEGRATION),
+    Case("integrate Slack notifications", "BUILD", _INTEGRATION),
+    Case("add Twilio SMS to the order flow", "BUILD", _INTEGRATION),
+    Case("integrate Plaid bank linking", "BUILD", _INTEGRATION),
+    Case("connect Resend for transactional emails", "BUILD", _INTEGRATION),
     Case("Create a new database schema for notifications", "BUILD", "supabase"),
     Case("build a new migration to add a status column", "BUILD", "supabase"),
     Case("new schema for the audit log table", "BUILD", "supabase"),
