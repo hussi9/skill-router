@@ -27,6 +27,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 # Plain route() tests must stay deterministic even when a local embedder
 # daemon is running for dogfood.
 os.environ.setdefault("SKILL_ROUTER_NO_EMBED", "1")
+# This file tests the v3 routing *table* — the fallback that runs when the
+# v4 index is absent. The index and the small-model stage are covered by
+# tests/test_index_match.py and tests/test_router_v4.py.
+_V3_ENV = {
+    "SKILL_ROUTER_NO_INDEX": "1",
+    "SKILL_ROUTER_LLM": "0",
+    "SKILL_ROUTER_SESSION_DIR": tempfile.mkdtemp(prefix="router-session-"),
+}
+os.environ.update(_V3_ENV)
+
+
+def setUpModule() -> None:
+    # Re-applied at run time: other test modules adjust the same variables
+    # in their own setUpModule, and pytest imports everything first.
+    os.environ.update(_V3_ENV)
 
 import router  # type: ignore[import-not-found]
 import embedder_daemon  # type: ignore[import-not-found]
@@ -240,11 +255,14 @@ class TestIronRule(unittest.TestCase):
         router.STRIKES.write_text("{}\n")
 
     def test_iron_rule_block_in_announcement(self) -> None:
+        # v4 tiers: OPERATE is a soft route (no edit block), BROKEN is hard.
         _, _, _, ann = router.route("refactor the auth module")
-        self.assertIn("IRON RULE", ann)
+        self.assertIn("Soft route", ann)
         self.assertIn('Skill(skill="refactor")', ann)
         self.assertIn("router_override.py", ann,
             "the announcement must name the way out of the rule")
+        _, _, _, broken = router.route("the checkout page throws a TypeError on submit")
+        self.assertIn("IRON RULE", broken)
 
     def test_iron_rule_names_first_skill_in_chain(self) -> None:
         # Multi-step OPERATE chain: verification → deploy. IRON RULE points at first.

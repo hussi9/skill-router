@@ -503,19 +503,43 @@ def iron_rule_block(chain: list[Step]) -> list[str]:
     if not chain:
         return []
     primary = chain[0].skill
+    card = LAST_CARD
+    # render() is also called directly (tests, dashboards) with a chain the
+    # last _finish never saw. A card that does not belong to this chain is
+    # stale: derive the tier from the path instead of trusting it.
+    if card.primary != primary:
+        card = RouteCard(tier=_tier_for(_path_of(chain), ()), primary=primary)
+    out: list[str] = [""]
+    if card.gates:
+        out.append("[skill-router] Gates before done: " + " · ".join(card.gates[:3]))
+    if card.memory:
+        out.append("[skill-router] Memory: " + ", ".join(card.memory[:2])
+                   + "  (read from ~/.claude/projects/-Users-airbook/memory/)")
     # Four lines, not nine. This block is injected on every routed turn, so
-    # every line is a permanent tax on the context window — and the long
-    # version spent five of them re-explaining an escape hatch the model
-    # needs perhaps once a week. State the rule, name the call, name the way
-    # out, stop.
-    return [
-        "",
-        f"[skill-router] IRON RULE: call Skill(skill=\"{primary}\") before any "
-        f"Edit/Write/Task.",
-        "[skill-router] Read/Glob/Grep/Bash/TodoWrite/Skill stay allowed.",
-        "[skill-router] Wrong call? scripts/router_override.py \"<reason>\" clears it "
-        "and teaches the router.",
-    ]
+    # every line is a permanent tax on the context window. State the rule,
+    # name the call, name the way out, stop.
+    if card.tier == "hard":
+        out += [
+            f"[skill-router] IRON RULE: call Skill(skill=\"{primary}\") before any "
+            f"Edit/Write/Task.",
+            "[skill-router] Read/Glob/Grep/Bash/TodoWrite/Skill stay allowed.",
+            "[skill-router] Wrong call? scripts/router_override.py \"<reason>\" clears it "
+            "and teaches the router.",
+        ]
+    else:
+        out += [
+            f"[skill-router] Soft route: call Skill(skill=\"{primary}\") before editing. "
+            f"Skipping it is allowed; the Stop hook will ask once why, and the answer "
+            f"teaches the router. Wrong call? scripts/router_override.py \"<reason>\".",
+        ]
+    return out
+
+
+def _path_of(chain: list[Step]) -> str:
+    """Best guess of the path a bare chain belongs to, for direct render() calls."""
+    if chain and chain[0].skill in ("superpowers:systematic-debugging", "systematic-debugging"):
+        return "BROKEN"
+    return "OPERATE"
 
 
 def _model_label(model: str) -> str:
@@ -638,7 +662,41 @@ def explicit_invocation(prompt: str) -> bool:
     return bool(EXPLICIT_INVOCATION_RE.match(prompt))
 
 
-def write_pending(chain: list[Step], path: str, domains: list[str]) -> None:
+def write_session_route(chain: list[Step], path: str, meta: Optional[dict]) -> None:
+    """What sub-agents and the Task hook read: the parent's current route.
+
+    One file per session id under ~/.claude/skill_router_session/, plus
+    latest.json for callers that have no session id. Fail-soft."""
+    meta = meta or {}
+    sid = str(meta.get("session_id") or "").strip()
+    card = LAST_CARD
+    payload = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "session_id": sid or None,
+        "path": path,
+        "skills": [s.skill for s in chain],
+        "primary": chain[0].skill if chain else None,
+        "tier": card.tier,
+        "gates": list(card.gates),
+        "memory": list(card.memory),
+        "decided_by": card.decided_by,
+    }
+    # Resolved at call time so a test module can point it somewhere hermetic
+    # after this module was imported.
+    session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR") or SESSION_DIR)
+    try:
+        session_dir.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(payload) + "\n"
+        (session_dir / "latest.json").write_text(text)
+        if sid:
+            safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)[:80]
+            (session_dir / f"{safe}.json").write_text(text)
+    except OSError:
+        pass
+
+
+def write_pending(chain: list[Step], path: str, domains: list[str],
+                  meta: Optional[dict] = None) -> None:
     """Persist the announced skill chain so PreToolUse / Stop hooks can enforce it.
 
     State file shape:
@@ -646,7 +704,9 @@ def write_pending(chain: list[Step], path: str, domains: list[str]) -> None:
         "ts": "...",
         "primary": "<first announced skill>",
         "remaining": ["<in-session steps only>"],
-        "all": ["<all announced steps>"]
+        "all": ["<all announced steps>"],
+        "tier": "hard" | "soft",
+        "session_id": "...", "prompt_id": "..."
       }
 
     Only in-session Skill() calls are tracked in .remaining. Parallel
@@ -662,13 +722,19 @@ def write_pending(chain: list[Step], path: str, domains: list[str]) -> None:
                 and chain[0].skill == "superpowers:writing-plans")
     in_session = chain[:1] if is_multi else chain
     PENDING.parent.mkdir(parents=True, exist_ok=True)
+    meta = meta or {}
     payload = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "primary": in_session[0].skill,
         "remaining": [s.skill for s in in_session],
         "all": [s.skill for s in chain],
+        "tier": LAST_CARD.tier,
+        "decided_by": LAST_CARD.decided_by,
+        "session_id": meta.get("session_id"),
+        "prompt_id": meta.get("prompt_id"),
     }
     PENDING.write_text(json.dumps(payload) + "\n")
+    write_session_route(chain, path, meta)
 
 
 def clear_pending() -> None:
@@ -914,6 +980,8 @@ class PersonalRoute:
     thinking: str = "none"
     path: str = "BUILD"
     matched: str = ""
+    tier: str = ""                       # hard | soft | "" (derive)
+    gates: tuple[str, ...] = ()
 
 
 def _parse_personal_routes(text: str) -> list[PersonalRoute]:
@@ -951,6 +1019,8 @@ def _parse_personal_routes(text: str) -> list[PersonalRoute]:
                 agent=str(cur.get("agent") or "general-purpose"),
                 thinking=str(cur.get("thinking") or "none"),
                 path=str(cur.get("path") or "BUILD").upper(),
+                tier=str(cur.get("tier") or "").lower(),
+                gates=tuple(cur.get("gates") or ()),  # type: ignore[arg-type]
             ))
         cur.clear()
 
@@ -974,14 +1044,14 @@ def _parse_personal_routes(text: str) -> list[PersonalRoute]:
         key, _, val = stripped.partition(":")
         key = key.strip()
         val = val.strip()
-        if key == "when":
+        if key in ("when", "gates"):
             items = val.strip("[]")
-            cur["when"] = [
+            cur[key] = [
                 piece.strip().strip("\"'")
                 for piece in items.split(",")
                 if piece.strip().strip("\"'")
             ]
-        elif key in ("name", "skill", "agent", "thinking", "path"):
+        elif key in ("name", "skill", "agent", "thinking", "path", "tier"):
             cur[key] = val.strip("\"'")
     flush()
     return routes
@@ -1017,7 +1087,7 @@ def match_personal_route(prompt: str) -> Optional[PersonalRoute]:
                     name=route.name, triggers=route.triggers, skill=route.skill,
                     agent=agent, thinking=route.thinking,
                     path=route.path if route.path in ("BROKEN", "BUILD", "OPERATE") else "BUILD",
-                    matched=trigger,
+                    matched=trigger, tier=route.tier, gates=route.gates,
                 )
     return None
 
@@ -1288,6 +1358,8 @@ def log_chain(path: str, chain: list[Step], domains: list[str],
             "steps": [s.skill for s in chain],
             "models": [s.model for s in chain],
             "saved": False, "via": "router-hook",
+            "tier": LAST_CARD.tier, "decided_by": LAST_CARD.decided_by,
+            "confidence": LAST_CARD.confidence,
             "session_id": meta.get("session_id"),
             "prompt_id": meta.get("prompt_id"),
         }) + "\n")
@@ -1375,26 +1447,221 @@ def learned_chain_after(skill: str) -> Optional[list[str]]:
     return None
 
 
+# ---- v4 route card state ------------------------------------------------------
+#
+# route() keeps its 4-tuple signature for every caller and test; the extra
+# facts a v4 route carries (tier, gates, memory, how it was decided) travel
+# through this module-level record, set by _finish and read by main().
+
+@dataclass
+class RouteCard:
+    tier: str = "soft"                  # hard | soft
+    gates: tuple[str, ...] = ()
+    memory: tuple[str, ...] = ()
+    decided_by: str = "table"           # project-route | index | llm | table
+    primary_kind: str = ""              # domain | design | project | process
+    confidence: str = ""
+    path: str = ""                      # the path this card was built for
+    primary: str = ""                   # chain[0].skill this card belongs to
+
+
+LAST_CARD = RouteCard()
+SESSION_DIR = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR")
+                   or Path.home() / ".claude" / "skill_router_session")
+DEFAULT_SOFT_PATHS = ("BUILD", "OPERATE")
+
+
+def _tier_for(path: str, gates: tuple[str, ...], explicit: str = "",
+              from_route: bool = False) -> str:
+    """hard for BROKEN and for project routes that declare gates or say so;
+    everything else soft. Gates inherited from the projects block are shown
+    on the card but do not harden an index-decided route."""
+    if explicit in ("hard", "soft"):
+        return explicit
+    if path == "BROKEN" or (gates and from_route):
+        return "hard"
+    return "soft"
+
+
 def _finish(path: str, chain: list[Step], domains: list[str],
-            prompt: str, note: str = "") -> tuple[str, list[Step], list[str], str]:
+            prompt: str, note: str = "", card: Optional[RouteCard] = None,
+            ) -> tuple[str, list[Step], list[str], str]:
     """Render an announcement and bolt the advisory lines onto it."""
+    global LAST_CARD
+    LAST_CARD = card or RouteCard(tier=_tier_for(path, ()))
+    LAST_CARD.path = path
+    LAST_CARD.primary = chain[0].skill if chain else ""
     announcement = render(path, chain, domains, note=note)
     if not announcement:
         return path, chain, domains, ""
-    found = specialist_for(prompt, exclude=[s.skill for s in chain])
-    if found is not None:
-        name, desc = found
-        announcement += (
-            f"\n[skill-router] Specialist available: {name}"
-            f"{' — ' + desc if desc else ''}"
-            f"\n[skill-router] (advisory — load it alongside the step above if it fits; "
-            f"not enforced)"
-        )
+    # The v4 index puts the domain skill *in* the chain, so the specialist
+    # advisory only fires when the chain is process-only.
+    if LAST_CARD.primary_kind in ("", "process"):
+        found = specialist_for(prompt, exclude=[s.skill for s in chain])
+        if found is not None:
+            name, desc = found
+            announcement += (
+                f"\n[skill-router] Specialist available: {name}"
+                f"{' — ' + desc if desc else ''}"
+                f"\n[skill-router] (advisory — load it alongside the step above if it fits; "
+                f"not enforced)"
+            )
     flow = learned_chain_after(chain[0].skill) if chain else None
     if flow and len(chain) == 1:
         announcement += ("\n[skill-router] Your usual flow from here: "
                          + " → ".join(flow[1:]) + "  (learned; advisory)")
     return path, chain, domains, announcement
+
+
+# ---- v4: index + LLM stages ---------------------------------------------------
+
+def _is_question(prompt: str) -> bool:
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import index_match  # type: ignore[import-not-found]
+        return index_match.detect_path(prompt) == "QUESTION"
+    except Exception:
+        return False
+
+
+def _index_classify(prompt: str):
+    """index_match.classify, or None when the index is missing/disabled."""
+    if os.environ.get("SKILL_ROUTER_NO_INDEX") == "1":
+        return None
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import index_match  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        res = index_match.classify(prompt)
+    except Exception:
+        return None
+    return res if res.candidates or res.path in ("QUESTION", "NONE") else res
+
+
+def _llm_decide(prompt: str, res) -> Optional[dict]:
+    """Ask the small model to settle a low-confidence ranking. None = no answer."""
+    if os.environ.get("SKILL_ROUTER_LLM", "1") in ("0", "off", "false"):
+        return None
+    if res is None or not res.candidates:
+        return None
+    if len(prompt.split()) < 4:
+        return None
+    try:
+        import llm_classify  # type: ignore[import-not-found]
+        import index_match  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    idx = index_match.load_index()
+    by_name = {d.name: d for d in idx.docs} if idx else {}
+    cands: list[tuple[str, str]] = []
+    for m in res.candidates[:6]:
+        d = by_name.get(m.name)
+        summary = "; ".join(d.use_when[:3]) if d and d.use_when else m.description[:140]
+        cands.append((m.name, summary))
+    projects = list(idx.project_aliases.keys()) if idx else []
+    try:
+        return llm_classify.classify(prompt, cands, projects)
+    except Exception:
+        return None
+
+
+def _agent_for_kind(kind: str) -> str:
+    if kind == "design" and valid_agent("product-designer"):
+        return "product-designer"
+    return "general-purpose"
+
+
+def _process_leg(path: str, prompt: str, domains: list[str]) -> list[Step]:
+    """The process skill(s) that pair with this path. OPERATE only when the
+    prompt actually asked for an operation the table knows; 'research
+    competitors' must not become `refactor`."""
+    if path == "BROKEN":
+        return build_broken_chain(prompt)
+    if path == "BUILD":
+        chain = build_build_chain(prompt, domains)
+        # Multi-domain BUILD chains fan the domain legs out to sub-agents;
+        # with a v4 primary in front that is one plan step plus the primary.
+        return chain[:1] if len(chain) > 1 else chain
+    if path == "OPERATE" and any_match(prompt, OPERATE_RE):
+        return build_operate_chain(prompt)
+    return []
+
+
+def route_v4(prompt: str) -> Optional[tuple[str, list[Step], list[str], str]]:
+    """Index + LLM route. Returns None to fall back to the v3 table route."""
+    domains = detect_domains(prompt)
+    res = _index_classify(prompt)
+    if res is None:
+        return None
+    if any_match(prompt, SKIP_RE) or res.path == "QUESTION":
+        return "SKIP", [], domains, ""
+    # The v3 regex triage keeps first refusal on the path: it knows
+    # "CRITICAL: database corrupted" and "clean it up" are work even though
+    # neither is phrased as a request. The index's path fills its silences.
+    path = triage(prompt)
+    if path == "SKIP":
+        path = res.path if res.path in ("BROKEN", "BUILD", "OPERATE") else "SKIP"
+    primary = res.primary if res.confidence == "high" else None
+    decided_by = "index" if primary else "table"
+    confidence = res.confidence
+    # On BROKEN a confident *plugin* match with no project evidence is still
+    # a guess ("vitest fails after upgrading vite" → vercel:next-upgrade).
+    # Let the small model confirm before it leads a hard-tier chain.
+    if (primary is not None and path == "BROKEN" and primary.owner == "plugin"
+            and not primary.project_hit):
+        primary = None
+        decided_by = "table"
+    if primary is None and res.candidates:
+        llm = _llm_decide(prompt, res)
+        if llm:
+            if llm["path"] == "QUESTION":
+                return "SKIP", [], domains, ""
+            if llm["path"] in ("BROKEN", "BUILD", "OPERATE"):
+                path = llm["path"]
+            by_name = {m.name: m for m in res.candidates}
+            for s in llm["skills"]:
+                m = by_name.get(s)
+                if m is not None:
+                    primary = m
+                    decided_by = "llm"
+                    confidence = "llm"
+                    break
+            if primary is None and not llm["skills"]:
+                decided_by = "llm-none"
+        # No model answer (offline, no key, disabled): a low-confidence match
+        # on one of the user's *own* skills is still worth a soft route —
+        # being wrong costs one line, being silent costs the skill.
+        if (primary is None and decided_by not in ("llm-none",) and res.primary is not None
+                and res.confidence == "low" and res.primary.owner in ("user", "project")
+                and path != "BROKEN"):
+            primary = res.primary
+            decided_by = "index-low"
+            confidence = "low"
+    if path == "SKIP":
+        return "SKIP", [], domains, ""
+    process = _process_leg(path, prompt, domains)
+    chain: list[Step] = []
+    if primary is not None and valid_skill(primary.name):
+        thinking = "think" if path in ("BROKEN", "BUILD") else "none"
+        chain.append(Step(primary.name, _agent_for_kind(primary.kind), "inherit", thinking))
+    for s in process:
+        if all(s.skill != c.skill for c in chain):
+            chain.append(s)
+    ghost = next((s.skill for s in chain if not valid_skill(s.skill)), None)
+    if ghost is not None:
+        chain = [s for s in chain if s.skill != ghost]
+    chain = _drop_soft(chain)
+    if not chain:
+        return "SKIP", [], domains, ""
+    gates = tuple(primary.gates) if primary is not None else ()
+    memory = tuple(primary.memory) if primary is not None else ()
+    card = RouteCard(tier=_tier_for(path, gates), gates=gates, memory=memory,
+                     decided_by=decided_by,
+                     primary_kind=(primary.kind if primary is not None else "process"),
+                     confidence=confidence)
+    return _finish(path, chain, domains, prompt, card=card)
 
 
 def _learned_fallback(prompt: str, domains: list[str]) -> tuple[str, list[Step], list[str], str]:
@@ -1415,14 +1682,29 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     """Return (path, chain, domains, announcement)."""
     domains = detect_domains(prompt)
 
+    # A question is a question even when it names a project: "what does the
+    # skill router do" must not fire the skill-system route.
+    if any_match(prompt, SKIP_RE) or _is_question(prompt):
+        return "SKIP", [], domains, ""
+
     # Project routes win over triage. A prompt naming one of your projects is
     # the least ambiguous signal the router ever gets, and generic triage
     # cannot recover it — see the PersonalRoute docs.
     personal = match_personal_route(prompt)
     if personal is not None and not is_deferred(personal.skill):
         chain = [Step(personal.skill, personal.agent, "inherit", personal.thinking)]
+        card = RouteCard(tier=_tier_for(personal.path, personal.gates, personal.tier,
+                                        from_route=True),
+                         gates=personal.gates, decided_by="project-route",
+                         primary_kind="project", confidence="route")
         return _finish(personal.path, chain, domains, prompt,
-                       note=f"project route `{personal.name}`")
+                       note=f"project route `{personal.name}`", card=card)
+
+    # v4: enriched index (+ small-model tie-break) decides the domain skill;
+    # the v3 table below only runs when the index is absent.
+    v4 = route_v4(prompt)
+    if v4 is not None:
+        return v4
 
     path = triage(prompt)
     if path == "SKIP":
@@ -1838,7 +2120,7 @@ def main() -> int:
         # refusing it. The router was being taught by its own test suite.
         if hook_mode:
             log_chain(path, chain, domains, meta=hook_meta)
-            write_pending(chain, path, domains)
+            write_pending(chain, path, domains, meta=hook_meta)
     else:
         # Both regex triage and embedding fallback returned SKIP. Last-ditch
         # path: check the online catalog for a novel uninstalled skill that

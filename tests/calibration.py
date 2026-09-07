@@ -230,7 +230,10 @@ def evaluate() -> dict:
             actual_path, chain = "SKIP", []
         else:
             actual_path, chain, _, _ = router.route(case.prompt)
-        actual_skill = chain[0].skill if chain else ""
+        # v4 puts the user's domain skill first and the process skill second;
+        # the expectation names the process skill, so match anywhere in the
+        # chain but report the whole chain when it misses.
+        actual_skill = " → ".join(s.skill for s in chain) if chain else ""
 
         # Path metrics — per-class precision/recall
         by_path[case.path]["total"] += 1

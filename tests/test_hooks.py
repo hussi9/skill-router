@@ -25,6 +25,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
+# Hermetic session-route directory: the live one holds whatever the user's
+# current session routed to, and a sub-agent brief test must not see it.
+_HOOK_SESSION_DIR = tempfile.mkdtemp(prefix="router-session-")
+os.environ["SKILL_ROUTER_SESSION_DIR"] = _HOOK_SESSION_DIR
+
+
+def setUpModule() -> None:
+    # Re-applied at run time: pytest imports every module before running any.
+    os.environ["SKILL_ROUTER_SESSION_DIR"] = _HOOK_SESSION_DIR
+    for f in Path(_HOOK_SESSION_DIR).glob("*.json"):
+        f.write_text("{}\n")
 
 import install_hooks  # type: ignore[import-not-found]
 

@@ -403,6 +403,46 @@ def learn_chains(sessions: list[list[dict]]) -> list[dict]:
 
 # ---- Discovery ---------------------------------------------------------------
 
+UNUSED_DAYS = 90
+
+
+def learn_soft_skips(events: list[dict]) -> dict[str, int]:
+    """Soft routes the model declined at turn end, per skill. A skill that is
+    declined again and again is one the router should stop leading with."""
+    out: Counter = Counter()
+    for e in events:
+        if e.get("type") != "soft-skip":
+            continue
+        for s in e.get("skills") or []:
+            if isinstance(s, str):
+                out[s] += 1
+    return dict(out)
+
+
+def learn_unused(invs: list[dict]) -> list[str]:
+    """Invokable skills with no invocation in UNUSED_DAYS — the next archive pass."""
+    try:
+        cat = json.loads(CATALOG.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    names = {e.get("name") for e in cat.get("entries", [])
+             if e.get("invokable") and (e.get("source") in ("user", "project"))}
+    cutoff = time.time() - UNUSED_DAYS * 86400
+    recent = {i["skill"] for i in invs if i.get("_t", 0) >= cutoff}
+    try:
+        usage = USAGE_LOG.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        usage = []
+    for line in usage:
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            ts = _ts(parts[0].replace(" ", "T"))
+            if ts and ts >= cutoff:
+                recent.add(parts[1].strip().split(":")[-1])
+                recent.add(parts[1].strip())
+    return sorted(n for n in names if n and n not in recent and n.split(":")[-1] not in recent)
+
+
 def _catalog_names() -> tuple[set[str], set[str]]:
     """(invokable skill names, all names incl. install-candidates).
 
@@ -690,6 +730,8 @@ def build() -> dict:
         "handovers": learn_handovers(sessions),
         "chains": learn_chains(sessions),
         "online": learn_online(events, invs),
+        "soft_skips": learn_soft_skips(events),
+        "unused_90d": learn_unused(invs),
     }
     overlay.update(learn_discovery(previous, now_iso))
     return overlay

@@ -149,6 +149,36 @@ def skills_for(agent_type: str) -> tuple[list[str], str]:
     return _derive(agent_type), "derived"
 
 
+def parent_route_lines(session_id: str, already: list[str]) -> list[str]:
+    """The parent session's route card, from task_brief's session file.
+    Skips skills the agent brief already names."""
+    try:
+        sys.path.insert(0, str(HERE))
+        import task_brief  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+    try:
+        route = task_brief.load_route(session_id)
+    except Exception:
+        return []
+    if not route:
+        return []
+    route = dict(route)
+    route["skills"] = [s for s in route.get("skills", []) if s not in already] or route.get("skills", [])
+    try:
+        return task_brief.brief_lines(route)
+    except Exception:
+        return []
+
+
+def parent_skills(lines: list[str]) -> list[str]:
+    import re
+    out: list[str] = []
+    for ln in lines:
+        out += re.findall(r'Skill\(skill="([^"]+)"\)', ln)
+    return out
+
+
 def render_brief(agent_type: str, skills: list[str], provenance: str) -> str:
     if not skills:
         return ""
@@ -193,10 +223,15 @@ def main() -> int:
 
     skills, provenance = skills_for(agent_type)
     brief = render_brief(agent_type, skills, provenance)
+    # The parent's current route reaches every agent, generic ones included:
+    # the skill this turn runs under, its completion gates, the memory file.
+    parent = parent_route_lines(str(payload.get("session_id") or ""), skills)
+    if parent:
+        brief = (brief + "\n" if brief else "") + "\n".join(parent)
     if not brief:
         return 0
 
-    log_event(agent_type, skills, provenance)
+    log_event(agent_type, skills + [f"parent:{s}" for s in parent_skills(parent)], provenance)
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "SubagentStart",

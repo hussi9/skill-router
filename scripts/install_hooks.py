@@ -95,20 +95,35 @@ def managed_hooks() -> dict[str, list[dict]]:
                 '[ -z "$out" ] && exit 0; '
                 'jq -n --arg msg "$out" \'{systemMessage: $msg, hookSpecificOutput: '
                 '{hookEventName: "UserPromptSubmit", additionalContext: $msg}}\'',
-                5,
+                # Lexical routing is ~50 ms; the small-model tie-break adds
+                # ~1 s and is itself capped at 6 s. 12 leaves headroom for a
+                # slow network without ever approaching the 30 s event cap.
+                12,
                 "Run the deterministic router and inject the [skill-router] "
                 "announcement as context before the model's first action.",
             )],
         }],
-        "PreToolUse": [{
-            MARKER: True,
-            "matcher": "Edit|Write|Task|NotebookEdit|MultiEdit",
-            "hooks": [hook(
-                f"{iron} pre", 5,
-                "IRON RULE: deny source-mutating tools until the announced "
-                "skill has been invoked. Stands down inside sub-agents.",
-            )],
-        }],
+        "PreToolUse": [
+            {
+                MARKER: True,
+                "matcher": "Edit|Write|Task|NotebookEdit|MultiEdit",
+                "hooks": [hook(
+                    f"{iron} pre", 5,
+                    "IRON RULE (hard tier only): deny source-mutating tools until "
+                    "the announced skill has been invoked. Soft routes pass. "
+                    "Stands down inside sub-agents.",
+                )],
+            },
+            {
+                MARKER: True,
+                "matcher": "Task|Agent",
+                "hooks": [hook(
+                    f"python3 {SCRIPTS}/task_brief.py", 5,
+                    "Append the parent's route card (skill, gates, memory) to "
+                    "every dispatched sub-agent prompt via updatedInput.",
+                )],
+            },
+        ],
         "PostToolUse": [{
             MARKER: True,
             "matcher": "Skill",
@@ -156,12 +171,15 @@ def managed_hooks() -> dict[str, list[dict]]:
                     # Order matters — the catalog feeds the learner, and the
                     # learner's discovery diff needs the fresh catalog.
                     f"({catalog} >/dev/null 2>&1; "
+                    f"python3 {SCRIPTS}/build_index.py --quiet --enrich >/dev/null 2>&1; "
+                    f"python3 {SCRIPTS}/refresh_env.py >/dev/null 2>&1; "
                     f"python3 {SCRIPTS}/learn.py --quiet --compact --refresh-online "
                     ">/dev/null 2>&1; "
                     f"bash {SCRIPTS}/ensure-plugin-deps.sh >/dev/null 2>&1) &",
                     3,
-                    "Rebuild the catalog, relearn the personal overlay, refetch "
-                    "the online catalog when stale, backfill plugin deps.",
+                    "Rebuild the catalog and the enriched index (enrichment is "
+                    "cached per skill version), refresh cached model keys from "
+                    "Doppler, relearn the overlay, backfill plugin deps.",
                 )],
             },
         ],

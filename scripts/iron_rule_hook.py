@@ -69,17 +69,48 @@ def read_payload() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def read_pending() -> list[str]:
+def read_pending_state() -> dict:
     if not PENDING.is_file():
-        return []
+        return {}
     try:
         data = json.loads(PENDING.read_text() or "{}")
     except (json.JSONDecodeError, OSError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    remaining = data.get("remaining")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def read_pending() -> list[str]:
+    remaining = read_pending_state().get("remaining")
     return [s for s in remaining if isinstance(s, str) and s] if isinstance(remaining, list) else []
+
+
+def pending_tier() -> str:
+    """hard | soft. Missing → hard, so an old-format state file keeps the
+    behaviour every existing test asserts."""
+    tier = str(read_pending_state().get("tier") or "hard").lower()
+    return "soft" if tier == "soft" else "hard"
+
+
+def record_soft_skip(skills: list[str]) -> None:
+    """A soft route reached turn end without its skill: log it so the learner
+    can demote a skill the model keeps declining, and mark the state so the
+    second Stop is not blocked again."""
+    try:
+        # Next to the pending file, so a test that redirects PENDING never
+        # writes fake skips into the live log the learner reads.
+        LOG = PENDING.parent / "skill_router_log.jsonl"
+        state = read_pending_state()
+        with LOG.open("a") as f:
+            import time
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "type": "soft-skip",
+                "skills": skills, "session_id": state.get("session_id"),
+                "prompt_id": state.get("prompt_id"),
+            }) + "\n")
+        state["soft_asked"] = True
+        PENDING.write_text(json.dumps(state) + "\n")
+    except OSError:
+        pass
 
 
 def clear_pending() -> None:
@@ -148,6 +179,26 @@ def main() -> int:
     # Guard 2 — an uninstallable skill cannot be satisfied, so stop asking.
     if not skill_installed(expected):
         clear_pending()
+        return 0
+
+    # Tier — soft routes never block edits. At turn end they ask once: load
+    # the skill, or say in one line why it was the wrong call. Either way
+    # the learner hears it, and the second Stop is never blocked.
+    if pending_tier() == "soft":
+        if mode != "stop":
+            return 0
+        if read_pending_state().get("soft_asked"):
+            return 0
+        record_soft_skip(remaining)
+        emit({
+            "decision": "block",
+            "reason": (
+                f"[skill-router] Soft route not used: {', '.join(remaining)}. "
+                f"Either call Skill(skill=\"{expected}\") now and finish, or finish with one "
+                f"line starting '[skill-router] skipped {expected}:' and the reason. "
+                f"Not asked again this turn."
+            ),
+        })
         return 0
 
     if mode == "stop":

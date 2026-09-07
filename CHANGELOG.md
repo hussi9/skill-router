@@ -1,5 +1,25 @@
 # Changelog
 
+## v4.0 — 2026-09-07
+
+- **Enriched skill index** (`build_index.py`, `index_match.py`): every invokable skill indexed by
+  "use when" triggers, keywords and project aliases; small-model enrichment cached per skill version.
+  Domain skills now lead the chain; the v3 table supplies the process leg.
+- **Small-model tie-break** (`llm_classify.py`): Anthropic Haiku → Gemini Flash-Lite, cached, ~1 s,
+  only on low confidence. `claude -p` measured at 3.5 min inside a hook and rejected.
+- **Route card**: gates and memory file per project; `projects:` block in SKILL.personal.md.
+- **Tiered enforcement**: hard on BROKEN and gated project routes; soft elsewhere (Stop asks once,
+  logs `soft-skip`).
+- **Sub-agent hand-off**: `task_brief.py` (PreToolUse Task|Agent, `updatedInput`) and the parent
+  route in every SubagentStart brief.
+- Learner: `soft_skips`, `unused_90d`. Doctor: index, model stage, hand-off hook.
+- Precision: evidence gate (no generic-word primaries), name-miss dock, project conflict demotion,
+  statement-vs-request detection. Calibration: 99.1 % path, 100 % skill (was 95.4 % / 64.2 %).
+- SKILL.md 2,388 → ~450 words; full tables moved to `references/routing-tables.md`.
+- Repairs: routes to archived skills removed; over-broad triggers (`testflight`, `briefing`) narrowed;
+  `agent_skills.json` pruned and repaired.
+
+
 All notable changes to skill-router. Newest first.
 
 ## Unreleased

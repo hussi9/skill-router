@@ -37,17 +37,17 @@ routes:
     agent: general-purpose
     path: OPERATE
     thinking: think
+    tier: hard
+    gates: ["vision audit passed before upload", "cost-log.md updated"]
 
-  - name: youtube-thumbnail
-    when: ["thumbnail"]
-    skill: youtube-thumbnail
-    path: BUILD
 
   - name: scrollbook-ship
-    when: ["testflight", "app store connect", "capgo", "play store", "scrollbook deploy", "scrollbook release"]
+    when: ["capgo", "scrollbook deploy", "scrollbook release", "scrollbook build", "scrollbook testflight"]
     skill: scrollbook-deploy
     path: OPERATE
     thinking: think
+    tier: hard
+    gates: ["tests green locally", "simulator screenshot"]
 
   - name: scrollbook-qa
     when: ["scrollbook qa", "scrollbook test"]
@@ -55,7 +55,7 @@ routes:
     path: OPERATE
 
   - name: scrollbook-authoring
-    when: ["scrollbook chapter", "scrollbook book", "story pool", "briefing"]
+    when: ["scrollbook chapter", "scrollbook book", "story pool"]
     skill: claude-author
     path: BUILD
     thinking: think
@@ -82,29 +82,97 @@ routes:
     skill: higgsfield
     path: BUILD
 
-  - name: seo-work
-    when: ["seo audit", "core web vitals", "schema markup", "serp", "backlink"]
-    skill: seo
-    path: OPERATE
-    thinking: think
 
-  - name: paid-ads
-    when: ["google ads", "meta ads", "ad account", "campaign budget", "ad creative"]
-    skill: ads
-    path: OPERATE
-    thinking: think
 
-  - name: marketing
-    when: ["landing page copy", "cold email", "positioning", "go-to-market", "growth loop"]
-    skill: market
-    path: BUILD
-    thinking: think
 
   - name: skill-system
     when: ["skill-router", "skill router", "routing table", "write a skill", "skill catalog"]
     skill: superpowers:writing-skills
     path: BUILD
     thinking: think
+```
+
+## PROJECTS — what a name means, which skills and memories belong to it
+
+Parsed by `scripts/build_index.py`. A prompt that names a project boosts that
+project's skills and demotes skills that belong to a *different* project, so
+"push deenunlock to testflight" can no longer land on `scrollbook-deploy`.
+`memory:` names files in `~/.claude/projects/-Users-airbook/memory/`; the route
+card names the first one that matches so the session opens with the right
+context. `gates:` are completion gates the route card repeats.
+
+```yaml
+projects:
+  youtube:
+    aliases: ["economicalai", "@economicalai", "youtube", "yt", "short", "shorts", "hook-forge", "retention"]
+    skills: ["youtube-manager", "yt-to-blog", "youtube-thumbnail", "higgsfield"]
+    memory: ["brand_manager_agent"]
+    gates: ["vision audit passed before upload", "cost-log.md updated"]
+  deenunlock:
+    aliases: ["deenunlock", "deen unlock", "prayer app", "muslim app", "salah"]
+    skills: []
+    memory: ["deenunlock-160-release-state", "deenunlock-150-release-state", "deenunlock-store-stats-runbook", "deenunlock-dua-ilm-uiux-parity", "deenunlock-flat-deed-economy"]
+    gates: ["simulator screenshot", "both platforms where the app has both"]
+  prayermode:
+    aliases: ["prayermode", "prayer mode", "christian app"]
+    skills: []
+    memory: ["prayermode_project"]
+    gates: ["simulator screenshot"]
+  scrollbook:
+    aliases: ["scrollbook", "linkiz", "story pool", "capgo"]
+    skills: ["scrollbook-deploy", "scrollbook-qa", "scrollbook-marketing", "claude-author", "pipeline"]
+    memory: ["scrollbook_marketing", "linkiz_design_inspiration_upscaleup"]
+    gates: ["tests green locally", "verification-before-completion invoked"]
+  aimasterz:
+    aliases: ["aimasterz", "theaibill", "the ai bill", "finops"]
+    skills: ["theaibill"]
+    memory: ["theaibill-practice", "no-premature-product-promo"]
+    gates: []
+  wseller:
+    aliases: ["wseller", "cosmetic dentist", "dentists", "lead gen", "outreach"]
+    skills: ["wseller"]
+    memory: []
+    gates: []
+  jobhunt:
+    aliases: ["jobhunt", "applypilot", "job pipeline", "resume", "job posting"]
+    skills: ["jobhunt-agent", "tailored-resume-generator"]
+    memory: ["mac_mini_infrastructure"]
+    gates: []
+  dealscout:
+    aliases: ["dealscout", "deal", "deals", "discount"]
+    skills: ["dealscout"]
+    memory: []
+    gates: []
+  mac:
+    aliases: ["macbook", "mac mini", "airbook", "kernel panic", "restarts", "restarted"]
+    skills: ["mac-doctor"]
+    memory: ["airbook_crash_root_cause", "mac_mini_infrastructure", "mac_doctor_skill"]
+    gates: []
+  linkedin:
+    aliases: ["linkedin", "personal brand", "brand manager", "post"]
+    skills: ["brand-manager", "yt-to-blog"]
+    memory: ["feedback-linkedin-post-style-v4", "linkedin_strategy_2026", "no-premature-product-promo"]
+    gates: ["hook carries a fact", "no product CTA"]
+  ibtrade:
+    aliases: ["ibtrade", "ibkr", "trading desk", "backtest"]
+    skills: []
+    memory: ["ibtrade-desk", "ibtrade-leverage-verdict"]
+    gates: []
+  sentigent:
+    aliases: ["sentigent", "warden", "control plane", "cockpit"]
+    skills: ["sentigent-score", "sentigent-review", "sentigent-learn"]
+    memory: ["warden_control_plane", "sentigent_cockpit"]
+    gates: []
+  marketing-ops:
+    aliases: ["marketing-ops", "adops", "ad operator", "meta ads", "google ads"]
+    skills: ["adops"]
+    memory: ["marketing_ops_platform", "adops_ads_mcp_wiring", "deenunlock_ads_kit"]
+    gates: []
+  skill-system:
+    aliases: ["skill-router", "skill router", "routing", "skill catalog"]
+    skills: ["skill-router", "superpowers:writing-skills"]
+    memory: ["claude-setup-cleanup-2026-09-06"]
+    gates: ["scripts/check.sh green"]
 ```
 
 **Adding a route:** name it, give it triggers only that project would ever

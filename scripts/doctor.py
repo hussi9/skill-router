@@ -192,6 +192,67 @@ def check_catalog(r: Report) -> None:
             "python3 scripts/build_catalog.py")
 
 
+INDEX = Path.home() / ".claude" / "skill_index.json"
+INDEX_STALE_DAYS = 2
+
+
+def check_index(r: Report) -> None:
+    """v4: the enriched index is what the ranker reads. Missing → v3 table only."""
+    if not INDEX.is_file():
+        r.check("skill index present and fresh", False, "no index file — routing is table-only",
+                "python3 scripts/build_index.py --enrich")
+        return
+    try:
+        data = json.loads(INDEX.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        r.check("skill index present and fresh", False, f"unreadable: {exc}",
+                "python3 scripts/build_index.py --enrich")
+        return
+    age_days = (time.time() - INDEX.stat().st_mtime) / 86400
+    total = int(data.get("total") or 0)
+    enriched = int(data.get("enriched") or 0)
+    projects = len(data.get("projects") or {})
+    ok = age_days <= INDEX_STALE_DAYS and total > 0
+    detail = f"{total} skills, {enriched} enriched, {projects} projects, {age_days:.1f} days old"
+    if total and enriched < total * 0.8:
+        detail += " — enrichment incomplete"
+    r.check("skill index present and fresh", ok, detail, "python3 scripts/build_index.py --enrich")
+
+
+def check_llm_stage(r: Report) -> None:
+    """Advisory: the small-model stage is optional; report which provider can answer."""
+    try:
+        import llm_classify  # type: ignore[import-not-found]
+        st = llm_classify.status()
+    except Exception as exc:
+        r.check("small-model stage", True, f"module unavailable ({exc}); lexical only", "")
+        return
+    if not st.get("enabled"):
+        r.check("small-model stage", True, "disabled by SKILL_ROUTER_LLM=0; lexical only", "")
+        return
+    have = [k for k in ("anthropic_key", "gemini_key") if st.get(k)]
+    detail = (f"keys: {', '.join(have) or 'none'} · {st.get('cache_entries', 0)} cached answers"
+              if have else "no model key cached — lexical only")
+    r.check("small-model stage", True, detail,
+            "python3 scripts/refresh_env.py --verbose (needs Doppler)")
+
+
+def check_task_hook(r: Report) -> None:
+    """v4: the Task/Agent PreToolUse hook is how the parent's route reaches sub-agents."""
+    try:
+        settings = json.loads(SETTINGS.read_text())
+    except (OSError, json.JSONDecodeError):
+        r.check("sub-agent hand-off hook wired", False, "settings.json unreadable",
+                "python3 scripts/install_hooks.py")
+        return
+    groups = (settings.get("hooks") or {}).get("PreToolUse") or []
+    wired = any("task_brief.py" in h.get("command", "")
+                for g in groups if isinstance(g, dict) for h in g.get("hooks", []))
+    r.check("sub-agent hand-off hook wired", wired,
+            "PreToolUse Task|Agent → task_brief.py" if wired else "task_brief.py not in settings.json",
+            "python3 scripts/install_hooks.py")
+
+
 def check_deferrals(r: Report) -> None:
     import router  # type: ignore[import-not-found]
 
@@ -375,6 +436,9 @@ def main() -> int:
     check_hook_scripts(r)
     check_no_ghosts(r)
     check_catalog(r)
+    check_index(r)
+    check_llm_stage(r)
+    check_task_hook(r)
     check_deferrals(r)
     check_agent_models(r)
     check_agents_register(r)
