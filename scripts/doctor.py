@@ -18,7 +18,8 @@ Six checks, ordered by how badly each one silences routing:
   5. deferrals sane       demotions must expire; permanent ones kill routing
   6. agents follow you    a pinned sub-agent model downgrades every dispatch
   7. agents register      a file without frontmatter is invisible, not broken
-  8. it actually routes   end-to-end, through the real entry point
+  8. overlay fresh        learning that stopped is discovery that stopped
+  9. it actually routes   end-to-end, through the real entry point
 
 Exit 0 when everything passes, 1 when any check fails. Safe to run any time.
 
@@ -297,6 +298,38 @@ def check_agents_register(r: Report) -> None:
             "filename with _ if it is not an agent")
 
 
+LEARNED = HOME / ".claude" / "skill_router_learned.json"
+LEARNED_STALE_DAYS = 3
+
+
+def check_overlay(r: Report) -> None:
+    """Is the learned overlay being regenerated?
+
+    The SessionStart hook relearns in the background on every startup. If the
+    file is missing or days old, either sessions are not starting through the
+    hook or the learner is crashing silently — and both discovery and the
+    handover nudges have quietly stopped with it.
+    """
+    if not LEARNED.is_file():
+        r.check("learned overlay fresh", False, "no overlay file yet",
+                "python3 scripts/learn.py")
+        return
+    try:
+        data = json.loads(LEARNED.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        r.check("learned overlay fresh", False, f"unreadable: {exc}",
+                "python3 scripts/learn.py")
+        return
+    age = (time.time() - LEARNED.stat().st_mtime) / 86400
+    c = data.get("counts", {})
+    detail = (f"{age:.1f} days old · {c.get('invocations', 0)} invocations, "
+              f"{c.get('prompts_with_tokens', 0)} prompts with keywords, "
+              f"{sum(len(v) for v in data.get('handovers', {}).values())} handovers, "
+              f"{len(data.get('online', []))} install candidates")
+    r.check("learned overlay fresh", age <= LEARNED_STALE_DAYS, detail,
+            "python3 scripts/learn.py — and check the SessionStart hook is firing")
+
+
 def check_end_to_end(r: Report) -> None:
     silent: list[str] = []
     for prompt in SMOKE_PROMPTS:
@@ -345,6 +378,7 @@ def main() -> int:
     check_deferrals(r)
     check_agent_models(r)
     check_agents_register(r)
+    check_overlay(r)
     check_end_to_end(r)
 
     if not args.quiet:

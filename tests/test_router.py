@@ -45,6 +45,13 @@ router.PENDING = Path(_STATE) / "pending.json"
 router.STRIKES = Path(_STATE) / "strikes.json"
 router.OVERRIDES_COUNT = Path(_STATE) / "overrides_count.json"
 router.OVERRIDES_LOG = Path(_STATE) / "overrides.jsonl"
+# The learned overlay too. It holds this machine's real follow rates and
+# triggers, and the embedder-rescue refusal reads it — so a test that expects
+# a rescue would pass or fail depending on what the user did last week.
+router.HISTORY = Path(_STATE) / "learned.json"
+router.LEARNED = router.HISTORY
+router.HISTORY.write_text("{}\n")
+router._load_history.cache_clear()
 for _f in (router.PENDING, router.STRIKES, router.OVERRIDES_COUNT):
     _f.write_text("{}\n")
 
@@ -73,7 +80,7 @@ GROUND_TRUTH: list[tuple[int, str, str, str]] = [
     (8,  "Build a new REST API endpoint for user analytics",
          "BUILD", "feature-dev"),
     (9,  "I need to integrate Stripe payments into checkout",
-         "BUILD", "connect-apps"),
+         "BUILD", "connect-apps" if router.valid_skill("connect-apps") else "writing-plans"),
     (10, "Create a new database schema for the notifications system",
          "BUILD", "supabase"),
     (11, "Write a new Claude skill file for ML model routing",
@@ -372,8 +379,13 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_stripe_catalog_upgrade(self) -> None:
         prompt = "I need to integrate Stripe payments into checkout"
-        _, chain, _, _ = router.route(prompt)
-        self.assertEqual(chain[0].skill, "connect-apps")
+        path, chain, _, _ = router.route(prompt)
+        self.assertEqual(path, "BUILD", "a missing specialist must not silence the prompt")
+        if router.valid_skill("connect-apps"):
+            self.assertEqual(chain[0].skill, "connect-apps")
+        else:
+            self.assertEqual(chain[0].skill, "superpowers:writing-plans",
+                "with the specialist archived the route degrades, not disappears")
 
 
 class TestEmbeddingFallback(unittest.TestCase):
@@ -927,6 +939,58 @@ class TestCollaborativeAnnouncement(unittest.TestCase):
             "the deny message must still tell the user how to opt out")
 
 
+class TestLoggingIsHookModeOnly(unittest.TestCase):
+    """Tests and probes must not teach the router anything."""
+
+    def test_cli_route_writes_no_chain_event(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        tmp_log = Path(tempfile.mkdtemp(prefix="router-log-")) / "log.jsonl"
+        real_log = router.LOG
+        router.LOG = tmp_log
+        os.environ["CLAUDE_USER_INPUT"] = "refactor the auth module"
+        os.environ.pop("SKILL_ROUTER_HOOK_MODE", None)
+        try:
+            with redirect_stdout(io.StringIO()):
+                router.main()
+            self.assertFalse(tmp_log.exists() and tmp_log.read_text().strip(),
+                "a non-hook run wrote a chain-start event the learner would count "
+                "as an announcement you ignored")
+        finally:
+            router.LOG = real_log
+            os.environ.pop("CLAUDE_USER_INPUT", None)
+
+    def test_hook_route_accepts_json_and_stamps_ids(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        tmp_log = Path(tempfile.mkdtemp(prefix="router-log-")) / "log.jsonl"
+        real_log = router.LOG
+        router.LOG = tmp_log
+        os.environ["CLAUDE_USER_INPUT"] = json.dumps({
+            "prompt": "refactor the auth module",
+            "session_id": "sess-1", "prompt_id": "pid-1"})
+        os.environ["SKILL_ROUTER_HOOK_MODE"] = "1"
+        try:
+            with redirect_stdout(io.StringIO()):
+                router.main()
+            events = [json.loads(l) for l in tmp_log.read_text().splitlines() if l.strip()]
+            types = {e["type"] for e in events}
+            self.assertIn("prompt", types, "hook mode must log the prompt's keywords")
+            self.assertIn("chain-start", types)
+            for e in events:
+                if e["type"] in ("prompt", "chain-start"):
+                    self.assertEqual(e.get("session_id"), "sess-1")
+                    self.assertEqual(e.get("prompt_id"), "pid-1")
+            prompt_event = next(e for e in events if e["type"] == "prompt")
+            self.assertIn("refactor", prompt_event["tokens"])
+            self.assertNotIn("the", prompt_event["tokens"], "keywords only, never prose")
+        finally:
+            router.LOG = real_log
+            os.environ.pop("CLAUDE_USER_INPUT", None)
+            os.environ.pop("SKILL_ROUTER_HOOK_MODE", None)
+            router.PENDING.write_text("{}\n")
+
+
 class TestPersonalRoutes(unittest.TestCase):
     """Project routes are the only layer that can tell one project from another."""
 
@@ -940,10 +1004,23 @@ class TestPersonalRoutes(unittest.TestCase):
                 self.assertGreaterEqual(len(t), router.MIN_TRIGGER_LEN,
                     f"trigger {t!r} in {r.name} is too short to be evidence")
 
-    def test_every_route_names_an_installed_skill(self) -> None:
+    def test_routes_with_missing_skills_degrade_silently(self) -> None:
+        """Skills get archived and uninstalled underneath a personal file.
+
+        The router must skip such a route (doctor reports it) rather than
+        announce a name Claude cannot load — that would deadlock the IRON
+        RULE. So the contract is: a matched route either names an installed
+        skill, or produces no announcement at all.
+        """
         for r in router.load_personal_routes():
-            self.assertTrue(router.valid_skill(r.skill),
-                f"route {r.name} points at uninstalled skill {r.skill}")
+            with self.subTest(route=r.name):
+                match = router.match_personal_route(f"do the {r.triggers[0]} thing")
+                if router.valid_skill(r.skill):
+                    self.assertIsNotNone(match)
+                    self.assertEqual(match.skill, r.skill)
+                else:
+                    self.assertIsNone(match,
+                        f"route {r.name} must go quiet while {r.skill} is not installed")
 
     def test_route_beats_generic_triage(self) -> None:
         parsed = router.load_personal_routes()

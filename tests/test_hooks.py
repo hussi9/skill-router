@@ -176,16 +176,79 @@ class TestSubagentBrief(unittest.TestCase):
         self.assertEqual(run_hook("subagent_brief.py", {},
                                   env={"SKILL_ROUTER_NO_LOG": "1"}), "")
 
-    def test_every_paired_skill_is_installed(self) -> None:
+    def test_every_emitted_skill_is_installed(self) -> None:
+        """The brief may only name skills the sub-agent can actually load.
+
+        Pairings in agent_skills.json are aspirations; skills get archived and
+        renamed under them. What matters is what reaches the sub-agent, so
+        the contract is on the emitted list, filtered at brief time.
+        """
         import router  # type: ignore[import-not-found]
+        import subagent_brief  # type: ignore[import-not-found]
         pairings = json.loads((ROOT / "agent_skills.json").read_text())
-        for agent, skills in pairings.items():
+        for agent in pairings:
             if agent.startswith("_"):
                 continue
+            skills, _ = subagent_brief.skills_for(agent)
             for skill in skills:
                 with self.subTest(agent=agent, skill=skill):
                     self.assertTrue(router.valid_skill(skill),
-                        f"{agent} is paired with uninstalled skill {skill}")
+                        f"brief for {agent} names uninstalled skill {skill}")
+
+    def test_archived_pairing_falls_back_rather_than_naming_it(self) -> None:
+        import subagent_brief  # type: ignore[import-not-found]
+        real = subagent_brief._load_pairings
+        subagent_brief._load_pairings = lambda: {"probe-agent": ["no-such-skill-xyz"]}
+        try:
+            skills, provenance = subagent_brief.skills_for("probe-agent")
+            self.assertNotIn("no-such-skill-xyz", skills)
+            self.assertEqual(provenance, "derived")
+        finally:
+            subagent_brief._load_pairings = real
+
+
+class TestHandoverNudge(unittest.TestCase):
+    """After a Skill call, say what usually comes next — if history is clear."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="nudge-"))
+        (self.tmp / ".claude").mkdir(parents=True)
+        self.env = {"HOME": str(self.tmp)}
+        self.learned = self.tmp / ".claude" / "skill_router_learned.json"
+
+    def _overlay(self, handovers: dict) -> None:
+        self.learned.write_text(json.dumps({"handovers": handovers}))
+
+    def test_clear_habit_produces_a_nudge(self) -> None:
+        self._overlay({"alpha": [{"to": "beta", "n": 6, "p": 0.75, "median_min": 4.0}]})
+        out = run_hook("skill_invoked.py", {"tool_input": {"skill": "alpha"},
+                                            "session_id": "s", "prompt_id": "p"}, env=self.env)
+        ctx = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual(ctx["hookEventName"], "PostToolUse")
+        self.assertIn("beta", ctx["additionalContext"])
+        self.assertIn("Advisory", ctx["additionalContext"])
+
+    def test_weak_habit_is_silent(self) -> None:
+        self._overlay({"alpha": [{"to": "beta", "n": 2, "p": 0.9}]})
+        self.assertEqual(run_hook("skill_invoked.py", {"tool_input": {"skill": "alpha"}},
+                                  env=self.env), "")
+        self._overlay({"alpha": [{"to": "beta", "n": 9, "p": 0.3}]})
+        self.assertEqual(run_hook("skill_invoked.py", {"tool_input": {"skill": "alpha"}},
+                                  env=self.env), "")
+
+    def test_no_nudge_inside_a_subagent(self) -> None:
+        self._overlay({"alpha": [{"to": "beta", "n": 6, "p": 0.75}]})
+        self.assertEqual(run_hook("skill_invoked.py", {"tool_input": {"skill": "alpha"},
+                                                       "agent_id": "ag1"}, env=self.env), "")
+
+    def test_invoke_event_carries_ids(self) -> None:
+        run_hook("skill_invoked.py", {"tool_input": {"skill": "alpha"},
+                                      "session_id": "sess-9", "prompt_id": "pid-9"}, env=self.env)
+        log = self.tmp / ".claude" / "skill_router_log.jsonl"
+        events = [json.loads(l) for l in log.read_text().splitlines()]
+        inv = next(e for e in events if e["type"] == "invoke")
+        self.assertEqual((inv["session_id"], inv["prompt_id"], inv["skill"]),
+                         ("sess-9", "pid-9", "alpha"))
 
 
 class TestInstaller(unittest.TestCase):
@@ -263,6 +326,19 @@ class TestInstaller(unittest.TestCase):
         for event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
                       "SubagentStart", "SessionStart"):
             self.assertIn(event, managed)
+
+    def test_session_start_has_a_foreground_brief_and_background_learning(self) -> None:
+        groups = install_hooks.managed_hooks()["SessionStart"]
+        commands = [h["command"] for g in groups for h in g["hooks"]]
+        brief = [c for c in commands if "session_brief.py" in c]
+        self.assertEqual(len(brief), 1)
+        self.assertNotIn("&", brief[0], "the brief is foreground: its stdout is context")
+        learn = [c for c in commands if "learn.py" in c]
+        self.assertEqual(len(learn), 1)
+        self.assertTrue(learn[0].rstrip().endswith("&"),
+            "learning is backgrounded: a session must never wait on it")
+        matchers = [g.get("matcher") for g in groups if any("session_brief" in h["command"] for h in g["hooks"])]
+        self.assertEqual(matchers, ["startup|resume"], "no brief on compact")
 
     def test_referenced_scripts_all_exist(self) -> None:
         for event, groups in install_hooks.managed_hooks().items():

@@ -10,38 +10,92 @@ override-reset hooks were reading empty input and silently doing nothing. That
 is why demotions never got cleared by a successful invoke, and why the
 override tally could only ever grow.
 
-Four jobs, in order, each independently fail-soft:
+Five jobs, in order, each independently fail-soft:
 
-  1. Append to ~/.claude/skill_usage.log      (the learning loop's ground truth)
-  2. Remove the skill from pending state      (satisfies the IRON RULE)
-  3. Clear its strike tally                   (re-arm after silent misses)
-  4. Clear its reasoned-override tally        (re-arm after corrections)
+  1. Append to ~/.claude/skill_usage.log      (statusline + legacy reports)
+  2. Append an `invoke` event with session_id + prompt_id to the router log
+                                              (the learner's join key)
+  3. Remove the skill from pending state      (satisfies the IRON RULE)
+  4. Clear its strike and override tallies    (re-arm the skill)
+  5. Emit the handover nudge, if history has one:
+       "[skill-router] After <skill> you usually run <next> (72%, n=9)."
+     Delivered as PostToolUse additionalContext — verified to reach the model
+     on this Claude Code version by injecting a token and having the model
+     quote it back. Advisory; nothing is enforced.
 
 Always exits 0.
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 HOME = Path.home()
 USAGE_LOG = HOME / ".claude" / "skill_usage.log"
+ROUTER_LOG = HOME / ".claude" / "skill_router_log.jsonl"
 PENDING = HOME / ".claude" / "skill_router_pending.json"
+LEARNED = HOME / ".claude" / "skill_router_learned.json"
+
+# A nudge fires only for a habit this clear. Below it, silence — a suggestion
+# that is right one time in three is noise the reader learns to skip.
+NUDGE_MIN_P = 0.5
+NUDGE_MIN_N = 3
 
 
-def invoked_skill() -> str:
+def read_payload() -> dict:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except (json.JSONDecodeError, ValueError, OSError):
-        return ""
-    if not isinstance(payload, dict):
-        return ""
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def invoked_skill(payload: dict) -> str:
     tool_input = payload.get("tool_input")
     if not isinstance(tool_input, dict):
         return ""
     return str(tool_input.get("skill") or "").strip()
+
+
+def log_invoke_event(skill: str, payload: dict) -> None:
+    """The structured twin of the usage-log line, with the ids the learner joins on."""
+    if os.environ.get("SKILL_ROUTER_NO_LEARN") == "1":
+        return
+    try:
+        ROUTER_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with ROUTER_LOG.open("a") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "type": "invoke",
+                "skill": skill,
+                "session_id": payload.get("session_id"),
+                "prompt_id": payload.get("prompt_id"),
+                "agent_id": payload.get("agent_id"),
+            }) + "\n")
+    except OSError:
+        pass
+
+
+def handover_nudge(skill: str) -> str:
+    """What you usually run next, from the learned overlay. Empty if no habit."""
+    if not LEARNED.is_file():
+        return ""
+    try:
+        data = json.loads(LEARNED.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return ""
+    nexts = (data.get("handovers") or {}).get(skill) or []
+    for h in nexts:
+        if not isinstance(h, dict):
+            continue
+        if float(h.get("p", 0)) >= NUDGE_MIN_P and int(h.get("n", 0)) >= NUDGE_MIN_N:
+            return (f"[skill-router] After {skill} you usually run {h['to']} "
+                    f"({float(h['p']):.0%} of the time, n={h['n']}). "
+                    f"Advisory — invoke it when this step is done if it still applies.")
+    return ""
 
 
 def log_usage(skill: str) -> None:
@@ -87,12 +141,22 @@ def rearm(skill: str) -> None:
 
 
 def main() -> int:
-    skill = invoked_skill()
+    payload = read_payload()
+    skill = invoked_skill(payload)
     if not skill:
         return 0
     log_usage(skill)
+    log_invoke_event(skill, payload)
     satisfy_pending(skill)
     rearm(skill)
+    # Sub-agents already got their brief at SubagentStart; a second nudge
+    # inside them would compete with the parent's plan.
+    if payload.get("agent_id"):
+        return 0
+    nudge = handover_nudge(skill)
+    if nudge:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PostToolUse", "additionalContext": nudge}}))
     return 0
 
 

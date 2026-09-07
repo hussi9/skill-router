@@ -119,14 +119,33 @@ def _derive(agent_type: str) -> list[str]:
     return out
 
 
+def _installed(skill: str) -> bool:
+    """Can the Skill tool load this right now? Fails open if unknown."""
+    try:
+        sys.path.insert(0, str(HERE))
+        import router  # type: ignore[import-not-found]
+        return router.valid_skill(skill)
+    except Exception:
+        return True
+
+
 def skills_for(agent_type: str) -> tuple[list[str], str]:
-    """Return (skill_names, provenance) for an agent type."""
+    """Return (skill_names, provenance) for an agent type.
+
+    A hand-set pairing is filtered against what is installed *now*. Skills
+    get archived, uninstalled and renamed; a brief that tells a sub-agent to
+    invoke one that is gone sends it chasing a name that fails, on a task
+    where it cannot ask for help. Anything left after filtering is used;
+    if nothing is left, fall back to deriving.
+    """
     if not agent_type or agent_type in GENERIC_AGENTS:
         return [], "generic"
     pairings = _load_pairings()
     explicit = pairings.get(agent_type) or pairings.get(agent_type.split(":")[-1])
     if isinstance(explicit, list) and explicit:
-        return [s for s in explicit if isinstance(s, str)][:MAX_SKILLS], "paired"
+        live = [s for s in explicit if isinstance(s, str) and _installed(s)][:MAX_SKILLS]
+        if live:
+            return live, "paired"
     return _derive(agent_type), "derived"
 
 

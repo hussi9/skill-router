@@ -151,3 +151,55 @@ either of which alone produces total silence.
 | Path accuracy (109 prompts) | 67.0% | 100% |
 | Skill accuracy | 43.3% | 100% |
 | Unit + hook tests | 16 failing | 104 passing |
+
+## v3.1 — it learns, and the learning lives outside the repo (2026-09-07)
+
+Routing was generic: it knew what kind of work a prompt was and which
+installed skill was about that domain, and nothing about how this user
+actually works. Everything personal now accumulates in
+`~/.claude/skill_router_learned.json`, regenerated at every session start by
+`scripts/learn.py`, never committed, never hand-edited. The earlier path that
+appended learned chains into `SKILL.personal.md` is retired.
+
+### Added
+
+- **Structured signals.** The router logs a `prompt` event (keywords only,
+  never text) with `session_id` + `prompt_id`; the Skill hook logs an `invoke`
+  event with the same ids. The join says "these words led to that skill",
+  which is the one thing the router could never learn from its own
+  announcements.
+- **Triggers** — keyword → skill, advisory, consulted only when the table and
+  the matcher are both silent. Support ≥ 3, precision ≥ 0.6.
+- **Handovers** — what you run after what, within a session. Delivered as a
+  `PostToolUse` nudge after a Skill call. Verified to reach the model on this
+  Claude Code version by injecting a token and having the model quote it
+  back. Fires only for habits ≥ 50% with n ≥ 3.
+- **Chains** — recurring 3–4 step flows, shown at announcement time as "your
+  usual flow from here".
+- **Discovery, installed** — the catalog is diffed against the last run; a new
+  skill is announced at the next session start, once.
+- **Discovery, online** — the four known catalogs (now 2,400 entries) are
+  refetched weekly in the background and ranked against the user's own recent
+  prompt keywords. Nothing is suggested until 20 prompts of signal exist.
+- **Session brief** — a foreground `SessionStart` hook prints at most three
+  lines about what changed. Silent otherwise; runs on startup/resume only.
+- `learn.py --compact` drops the dead embedder's neighbour dumps: 4.0 MB →
+  248 KB, 2,474 events that informed nothing.
+- `doctor.py` check 8: the overlay is being regenerated.
+
+### Fixed
+
+- **The router was being taught by its own test suite.** Every test run,
+  doctor smoke prompt and manual probe wrote a chain-start event no Skill
+  call would follow; the learner read those as announcements the user
+  ignored and drove systematic-debugging's follow rate to zero. Logging is
+  hook-mode only now, and the learner ignores unstamped announcements from
+  the structured era.
+- Sub-agent briefs filter hand-set pairings against what is installed, so an
+  archived skill is never named to an agent that cannot ask what happened.
+- A missing integration specialist (`connect-apps` archived) degrades to the
+  generic plan step instead of silencing the whole prompt.
+- Online suggestions dedupe by bare name, so `superpowers:*` is not offered
+  back as an install; packaging words are excluded from the interest profile.
+- Tests are hermetic against the overlay. One expected an embedder rescue
+  that the user's real follow rates now refuse.

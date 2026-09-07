@@ -47,6 +47,8 @@ MARKER = "_skill_router"
 # a second copy of every hook beside the unmarked originals.
 OWNED_SCRIPTS = (
     "skill-router/scripts/router.py",
+    "skill-router/scripts/session_brief.py",
+    "skill-router/scripts/learn.py",
     "skill-router/scripts/iron_rule_hook.py",
     "skill-router/scripts/skill_invoked.py",
     "skill-router/scripts/subagent_brief.py",
@@ -85,11 +87,11 @@ def managed_hooks() -> dict[str, list[dict]]:
         "UserPromptSubmit": [{
             MARKER: True,
             "hooks": [hook(
-                # jq extracts the prompt; an empty prompt exits before python
-                # starts, which keeps the no-op path off the critical path of
-                # every keystroke-driven turn.
-                'prompt=$(jq -r \'.prompt // empty\'); [ -z "$prompt" ] && exit 0; '
-                f'out=$(SKILL_ROUTER_HOOK_MODE=1 {router} <<< "$prompt" 2>/dev/null); '
+                # The whole hook payload goes to the router, not just `.prompt`:
+                # it needs session_id and prompt_id so the learner can join a
+                # prompt's keywords to the skill later invoked on it. The
+                # router parses JSON-or-raw, so manual probes still work.
+                f'out=$(SKILL_ROUTER_HOOK_MODE=1 {router} 2>/dev/null); '
                 '[ -z "$out" ] && exit 0; '
                 'jq -n --arg msg "$out" \'{systemMessage: $msg, hookSpecificOutput: '
                 '{hookEventName: "UserPromptSubmit", additionalContext: $msg}}\'',
@@ -134,17 +136,35 @@ def managed_hooks() -> dict[str, list[dict]]:
                 "half of the work that previously ran skill-blind.",
             )],
         }],
-        "SessionStart": [{
-            MARKER: True,
-            "hooks": [hook(
-                # Backgrounded: a session must never wait on a catalog rebuild.
-                f"({catalog} >/dev/null 2>&1; bash {SCRIPTS}/ensure-plugin-deps.sh "
-                ">/dev/null 2>&1) &",
-                3,
-                "Refresh the skill catalog so newly installed skills are "
-                "routable this session, and backfill plugin node_modules.",
-            )],
-        }],
+        "SessionStart": [
+            {
+                MARKER: True,
+                "matcher": "startup|resume",
+                "hooks": [hook(
+                    # Foreground and fast (reads one JSON file): what changed
+                    # since last time. Plain stdout becomes session context.
+                    f"python3 {SCRIPTS}/session_brief.py",
+                    3,
+                    "Announce newly installed skills, install candidates that "
+                    "fit recent work, and the usual flow — three lines, max.",
+                )],
+            },
+            {
+                MARKER: True,
+                "hooks": [hook(
+                    # Backgrounded: a session must never wait on any of this.
+                    # Order matters — the catalog feeds the learner, and the
+                    # learner's discovery diff needs the fresh catalog.
+                    f"({catalog} >/dev/null 2>&1; "
+                    f"python3 {SCRIPTS}/learn.py --quiet --compact --refresh-online "
+                    ">/dev/null 2>&1; "
+                    f"bash {SCRIPTS}/ensure-plugin-deps.sh >/dev/null 2>&1) &",
+                    3,
+                    "Rebuild the catalog, relearn the personal overlay, refetch "
+                    "the online catalog when stale, backfill plugin deps.",
+                )],
+            },
+        ],
     }
 
 

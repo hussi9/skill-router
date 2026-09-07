@@ -20,6 +20,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -446,7 +447,15 @@ def build_build_chain(text: str, domains: list[str]) -> list[Step]:
     if len(domains) == 1:
         s = DOMAIN_SKILL[domains[0]]
         if domains[0] == "3rd-party":
-            s = Step(catalog_upgrade(text, s.skill), "integration-specialist", "inherit", "none")
+            specialist = catalog_upgrade(text, s.skill)
+            if valid_skill(specialist):
+                s = Step(specialist, "integration-specialist", "inherit", "none")
+            else:
+                # The integration skill is archived or uninstalled. A missing
+                # specialist must not silence routing on the whole prompt —
+                # the ghost guard would drop the chain and say nothing — so
+                # degrade to the generic plan step instead.
+                s = Step("superpowers:writing-plans", "integration-specialist", "inherit", "think")
         return [s]
     # Multi-domain build → writing-plans + parallel domain skills
     chain: list[Step] = [Step("superpowers:writing-plans", "general-purpose", "inherit", "none")]
@@ -1039,7 +1048,12 @@ def specialist_for(prompt: str, exclude: list[str]) -> Optional[tuple[str, str]]
     return match.name, desc
 
 
-HISTORY = Path.home() / ".claude" / "skill_router_history.json"
+# The learned overlay written by scripts/learn.py. Supersedes the old
+# skill_router_history.json, which nothing had written since May: the router
+# was reading a per-skill follow-rate table frozen at the moment the miner
+# was last run by hand. The overlay is regenerated every session start.
+HISTORY = Path.home() / ".claude" / "skill_router_learned.json"
+LEARNED = HISTORY
 
 
 @functools.lru_cache(maxsize=1)
@@ -1259,9 +1273,11 @@ def valid_skill(name: str) -> bool:
 
 # ---- Logging ----------------------------------------------------------------
 
-def log_chain(path: str, chain: list[Step], domains: list[str]) -> None:
+def log_chain(path: str, chain: list[Step], domains: list[str],
+              meta: Optional[dict] = None) -> None:
     if path == "SKIP" or not chain:
         return
+    meta = meta or {}
     LOG.parent.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
     name = f"{path.lower()}-{'-'.join(domains).lower() or 'single'}"
@@ -1272,6 +1288,8 @@ def log_chain(path: str, chain: list[Step], domains: list[str]) -> None:
             "steps": [s.skill for s in chain],
             "models": [s.model for s in chain],
             "saved": False, "via": "router-hook",
+            "session_id": meta.get("session_id"),
+            "prompt_id": meta.get("prompt_id"),
         }) + "\n")
         for i, s in enumerate(chain, 1):
             f.write(json.dumps({
@@ -1299,9 +1317,67 @@ def _drop_soft(chain: list[Step]) -> list[Step]:
     return [s for s in chain if not is_deferred(s.skill)]
 
 
+# ---- Learned overlay consumers -----------------------------------------------
+#
+# Everything below reads ~/.claude/skill_router_learned.json (written by
+# scripts/learn.py) and is advisory. Learned associations never carry the IRON
+# RULE: they are statistics about your habits, not a decision the table made,
+# and enforcing a habit would turn a nudge into a cage.
+
+LEARNED_TRIGGER_MIN_SCORE = 1.2   # summed precision×log(1+n) over matched tokens
+LEARNED_TRIGGER_MIN_MARGIN = 0.25
+
+
+def learned_trigger_for(prompt: str) -> Optional[tuple[str, list[str]]]:
+    """Skill your history says this prompt wants, when the table is silent.
+
+    Scores each skill by the learned keyword→skill statistics for the words in
+    the prompt. Requires a clear winner; ties stay silent.
+    """
+    triggers = _load_history().get("triggers")
+    if not isinstance(triggers, list) or not triggers:
+        return None
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from catalog_match import tokenize  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    tokens = set(tokenize(prompt))
+    if not tokens:
+        return None
+    score: dict[str, float] = {}
+    hits: dict[str, list[str]] = {}
+    for t in triggers:
+        tok, skill = t.get("token"), t.get("skill")
+        if tok in tokens and skill and valid_skill(skill):
+            score[skill] = score.get(skill, 0.0) + float(t.get("precision", 0)) * math.log1p(int(t.get("n", 0)))
+            hits.setdefault(skill, []).append(tok)
+    if not score:
+        return None
+    ranked = sorted(score.items(), key=lambda kv: -kv[1])
+    best, best_score = ranked[0]
+    if best_score < LEARNED_TRIGGER_MIN_SCORE:
+        return None
+    if len(ranked) > 1 and (best_score - ranked[1][1]) / best_score < LEARNED_TRIGGER_MIN_MARGIN:
+        return None
+    return best, hits[best]
+
+
+def learned_chain_after(skill: str) -> Optional[list[str]]:
+    """The recurring sequence that starts with `skill`, if you have one."""
+    chains = _load_history().get("chains")
+    if not isinstance(chains, list):
+        return None
+    for c in chains:
+        steps = c.get("steps") or []
+        if len(steps) >= 3 and steps[0] == skill:
+            return list(steps)
+    return None
+
+
 def _finish(path: str, chain: list[Step], domains: list[str],
             prompt: str, note: str = "") -> tuple[str, list[Step], list[str], str]:
-    """Render an announcement and bolt the advisory specialist line onto it."""
+    """Render an announcement and bolt the advisory lines onto it."""
     announcement = render(path, chain, domains, note=note)
     if not announcement:
         return path, chain, domains, ""
@@ -1314,7 +1390,25 @@ def _finish(path: str, chain: list[Step], domains: list[str],
             f"\n[skill-router] (advisory — load it alongside the step above if it fits; "
             f"not enforced)"
         )
+    flow = learned_chain_after(chain[0].skill) if chain else None
+    if flow and len(chain) == 1:
+        announcement += ("\n[skill-router] Your usual flow from here: "
+                         + " → ".join(flow[1:]) + "  (learned; advisory)")
     return path, chain, domains, announcement
+
+
+def _learned_fallback(prompt: str, domains: list[str]) -> tuple[str, list[Step], list[str], str]:
+    """When every deterministic layer is silent, ask the overlay. Advisory only:
+    no IRON RULE, no pending state — hence the announcement is rendered without
+    the rule block and route() returns path 'SKIP' so nothing is enforced."""
+    found = learned_trigger_for(prompt)
+    if found is None:
+        return "SKIP", [], domains, ""
+    skill, toks = found
+    text = (f"[skill-router] Learned from your history: prompts with "
+            f"{', '.join(toks[:4])} usually use {skill}.\n"
+            f"[skill-router] Advisory — Skill(skill=\"{skill}\") if it fits; not enforced.")
+    return "SKIP", [], domains, text
 
 
 def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
@@ -1347,7 +1441,7 @@ def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
                     return "SKIP", [], domains, ""
                 return _finish(path, chain, domains, prompt)
             print(f"[skill-router-warn] embedding ghost skill: {ghost}", file=sys.stderr)
-        return "SKIP", [], domains, ""
+        return _learned_fallback(prompt, domains)
     if path == "BROKEN":
         chain = build_broken_chain(prompt)
     elif path == "BUILD":
@@ -1644,9 +1738,65 @@ def render_online_suggestion(entry: dict) -> str:
     ])
 
 
+def _read_input() -> tuple[str, dict]:
+    """(prompt, hook_meta). Accepts the hook's JSON or a raw prompt.
+
+    The UserPromptSubmit hook now pipes its whole stdin JSON here instead of
+    pre-extracting `.prompt` with jq, because the learner needs session_id
+    and prompt_id to join a prompt to the skill that was later invoked on it.
+    Raw text still works so tests and manual probes stay simple.
+    """
+    raw = os.environ.get("CLAUDE_USER_INPUT", "") or sys.stdin.read()
+    stripped = raw.strip()
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict) and "prompt" in data:
+                return str(data.get("prompt") or "").strip(), data
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return stripped, {}
+
+
+def log_prompt_event(prompt: str, meta: dict, path: str, chain: list[Step],
+                     note: str = "") -> None:
+    """Record what this prompt looked like and what was announced for it.
+
+    Keywords only — never the prompt text. This is the learner's join key:
+    the invoke event written when a Skill runs carries the same session_id
+    and prompt_id, and the pair says "these words led to that skill". Without
+    it the router could only ever learn from its own announcements, i.e.
+    re-learn its own table.
+    """
+    if os.environ.get("SKILL_ROUTER_NO_LEARN") == "1":
+        return
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from catalog_match import tokenize  # type: ignore[import-not-found]
+        tokens = sorted(set(tokenize(prompt)))[:40]
+    except ImportError:
+        tokens = []
+    if not tokens:
+        return
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a") as f:
+            f.write(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "type": "prompt",
+                "session_id": meta.get("session_id"),
+                "prompt_id": meta.get("prompt_id"),
+                "path": path,
+                "route": chain[0].skill if chain else None,
+                "note": note or None,
+                "tokens": tokens,
+            }) + "\n")
+    except OSError:
+        pass
+
+
 def main() -> int:
-    prompt = os.environ.get("CLAUDE_USER_INPUT", "") or sys.stdin.read()
-    prompt = prompt.strip()
+    prompt, hook_meta = _read_input()
     # Hook-mode gate: only the UserPromptSubmit hook should mutate the live
     # iron-rule state. CLI invocations (testing, scripts, dashboards) must not
     # poison ~/.claude/skill_router_pending.json — that would block tools in
@@ -1676,10 +1826,18 @@ def main() -> int:
     except Exception as e:
         print(f"[skill-router-error] {e}", file=sys.stderr)
         return 1
+    if hook_mode:
+        log_prompt_event(prompt, hook_meta, path, chain)
     if announcement:
         print(announcement)
-        log_chain(path, chain, domains)
+        # Logging, like pending state, belongs to hook mode only. Every test
+        # run, doctor smoke prompt and manual probe used to write a
+        # chain-start event that no Skill call would ever follow — the learner
+        # then read those as announcements you ignored, drove the follow rate
+        # for systematic-debugging to zero, and the embedder rescue started
+        # refusing it. The router was being taught by its own test suite.
         if hook_mode:
+            log_chain(path, chain, domains, meta=hook_meta)
             write_pending(chain, path, domains)
     else:
         # Both regex triage and embedding fallback returned SKIP. Last-ditch

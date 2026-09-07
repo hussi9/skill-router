@@ -182,6 +182,12 @@ class TestLiveCatalog(unittest.TestCase):
                 self.assertIsNone(catalog_match.best(prompt))
 
     def test_named_domains_find_their_specialist(self) -> None:
+        """When the specialist is installed it must be found. When it has been
+        archived or uninstalled the case is skipped rather than failed: the
+        matcher cannot be blamed for a skill that is not there, and a suite
+        that goes red whenever the user tidies their skills teaches them to
+        ignore the suite."""
+        installed = {d.name for d in self.index.docs if d.invokable}
         for prompt, expected in (
             ("run a technical seo audit on the marketing site", "seo-technical"),
             ("submit the build to testflight", "scrollbook-deploy"),
@@ -189,6 +195,8 @@ class TestLiveCatalog(unittest.TestCase):
             ("deploy to vercel production", "vercel:deploy"),
         ):
             with self.subTest(prompt=prompt):
+                if expected not in installed:
+                    self.skipTest(f"{expected} is not installed on this machine")
                 match = catalog_match.best(prompt)
                 self.assertIsNotNone(match, f"{prompt!r} found no specialist")
                 self.assertEqual(match.name, expected)
