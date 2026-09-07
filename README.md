@@ -2,240 +2,156 @@
 
 [![GitHub stars](https://img.shields.io/github/stars/hussi9/skill-router?style=social)](https://github.com/hussi9/skill-router/stargazers) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![CI](https://github.com/hussi9/skill-router/workflows/lint/badge.svg)](https://github.com/hussi9/skill-router/actions)
 
-**Right Skill, right Agent, right Model, right Thinking depth — before any tool fires.**
+**Your skill first, the process skill second, gates and memory on the card — before any tool fires.**
 
-One SKILL.md (~300 lines). Auto-loaded by Claude Code. Zero UX. **80% composite routing accuracy / 90% path-only** on 20 real prompts (3-run average). Every announcement line is `[skill-router]`-prefixed so `grep` can audit your transcript.
+A hook-driven router for Claude Code. It indexes every skill you have installed by *when it applies*, ranks them against each prompt in ~80 ms, asks a small model only when the ranking is unsure, and injects a route card before Claude's first action. Enforcement is tiered: hard where a wrong skill is expensive, soft everywhere else. The route follows every sub-agent you dispatch.
 
 ```
-$ > add a settings page that writes to the db and emails the user
-
-[skill-router] This touches 3 domains: UI/Frontend, DB schema, Edge function.
-[skill-router] Chain: superpowers:writing-plans → frontend-design:frontend-design + db-expert
-[skill-router] Models: sonnet · sonnet+sonnet  ·  Thinking: think
+> my macbook restarted again last night, can you check why
+[skill-router] This is a BROKEN task — 2-step chain.
+[skill-router] Chain: mac-doctor → superpowers:systematic-debugging
 [skill-router] Invoke step 1/2 now:
-
-▶ superpowers:writing-plans  (sonnet, in-session)
-▶ frontend-design:frontend-design + db-expert  (sonnet, parallel via Agent)
+▶ mac-doctor  (inherit, in-session)
+▶ superpowers:systematic-debugging  (inherit, in-session)
+[skill-router] Memory: airbook_crash_root_cause  (read from ~/.claude/projects/.../memory/)
+[skill-router] IRON RULE: call Skill(skill="mac-doctor") before any Edit/Write/Task.
 ```
 
-The router announces what it will do *before* any tool fires. `[skill-router]` on every line is the testable contract — `grep '\[skill-router\]'` your transcript and verify what fired matches what was announced.
+Every line is `[skill-router]`-prefixed, so `grep '\[skill-router\]'` on a transcript shows exactly what was routed.
 
-Every step also writes to `~/.claude/skill_router_log.jsonl`. Run `python3 scripts/audit-dispatch.py` after a week to score whether the router is actually following its own protocol.
+## Why (v4, September 2026)
 
-![chain announcement](assets/proof/chain-multi-domain.png)
+An audit of this machine after five months of use:
 
-## Why you'll want this
+| Finding | Number |
+|---|---|
+| Skills installed / ever invoked / invoked last month | 291 / 80 / 32 |
+| Tokens the skill listing cost every session start | ~22,600 |
+| Skills the v3 routing table could name | ~20 (all process skills) |
+| Real prompts the v3 router answered with silence | 4 of 10 |
+| `writing-plans` announced / followed | 6 / 1 |
+| Months routing was dead without anyone noticing | 2 |
 
-Claude Code has a skills ecosystem with 2,700+ skills. There's no built-in routing layer.
+The routing table could never enumerate the domain skills — they change weekly — and hard-blocking edits on a process skill the model does not value produced workarounds, not compliance. v4 replaces the table with an index, and replaces uniform enforcement with tiers. Full evidence and design: [docs/v4-design.md](./docs/v4-design.md).
 
-Claude guesses which skill to use — or ignores them entirely. On a 20-prompt test harness, it picks the wrong skill ~20% of the time, skips skills it decides are "too simple," and makes no attempt to match model cost to task complexity. `skill-router` replaces that implicit guessing with a deterministic 3-question triage that runs before every non-trivial task.
-
-Three things make the wrong-skill problem worse as you install more skills:
-
-**No routing.** Claude has no deterministic layer that decides: what is this task? what skill fits? what model is right? Without a routing layer, more skills = more ambiguity.
-
-**No catalog maintenance.** Your installed skills drift. Ghost entries pile up. The router validates skill existence before blocking on iron-rule enforcement — deadlocks are caught automatically.
-
-**No chaining.** Multi-domain work needs skills to fan out. "Add Stripe checkout that saves to DB and emails the user" is 4 domains — the router builds and dispatches the chain.
-
-## What it actually outputs
-
-Multi-domain BUILD — skills fan out in parallel:
+## How it decides
 
 ```
-> add stripe checkout — saves order to db, emails confirmation
-
-[skill-router] This touches 4 domains: 3rd-party, DB schema, Edge function, UI/Frontend.
-[skill-router] Chain: superpowers:writing-plans → connect-apps + db-expert + frontend-design:frontend-design
-[skill-router] Models: sonnet · sonnet+sonnet+sonnet  ·  Thinking: think
-[skill-router] Invoke step 1/2 now:
-
-▶ superpowers:writing-plans  (sonnet, in-session)
-▶ connect-apps + db-expert + frontend-design:frontend-design  (sonnet, parallel via Agent)
+prompt ──► project route (SKILL.personal.md)          deterministic, wins outright
+       ──► enriched index rank (skill_index.json)     ~80 ms, name · use_when · keywords · project aliases
+       ──► small-model tie-break (Gemini Flash-Lite)  only below 35 % margin, ~1 s, cached
+       ──► path (BROKEN / BUILD / OPERATE) + process leg from the table
+       ──► route card: domain skill · process skill · gates · memory · tier
 ```
 
-Research → plan → steering meeting — the idea-to-feature pipeline:
+- **Index.** `build_index.py` reads every invokable SKILL.md, extracts "use when" triggers and keywords, and a one-time small-model pass adds more — cached per file hash, so the bill grows only when a skill changes. Third-party skill files are never edited.
+- **Projects.** A `projects:` block maps names to skills, memory files and completion gates. "push deenunlock to testflight" no longer lands on the scrollbook deploy skill because both ship to TestFlight.
+- **Precision.** A winner needs real evidence: a project hit, or a distinctive non-generic token in its name, triggers or keywords. "flow" alone never picks `ux-flow`.
+- **Tiers.** Hard (edit block until the skill loads) on the BROKEN path and on project routes with gates. Soft elsewhere: the Stop hook asks once, and the answer teaches the router.
+- **Sub-agents.** A `PreToolUse` hook on `Task` appends the parent's route to every dispatched prompt; `SubagentStart` briefs the agent with its paired skills.
 
-```
-> want to add AI spending coach — weekly check-ins, pattern detection,
-> personalized nudges. is this worth building? if yes, plan it out.
+Pipeline detail: [docs/how-it-works.md](./docs/how-it-works.md).
 
-[skill-router] This touches 3 domains: Research/Strategy, Product planning, Architecture.
-[skill-router] Chain: superpowers:brainstorming → superpowers:writing-plans → product-manager + tech-lead
-[skill-router] Models: sonnet · sonnet · opus+opus  ·  Thinking: ultrathink
-[skill-router] Invoke step 1/3 now:
-
-▶ superpowers:brainstorming    (sonnet, in-session)
-▶ superpowers:writing-plans    (sonnet, in-session)
-▶ product-manager + tech-lead  (opus, parallel via Agent)
-```
-
-Step 1 researches the idea — prior art, risks, what similar products got wrong.
-Step 2 converts that into a structured plan with tasks and open questions.
-Step 3 runs a steering meeting: product-manager and tech-lead both read the plan simultaneously on opus — heaviest thinking, before a line of code is touched.
-
-Single-domain OPERATE — safety gate before deploy:
-
-```
-> deploy to production
-
-[skill-router] This is a OPERATE task — 2-step chain.
-[skill-router] Chain: superpowers:verification-before-completion → vercel:deploy
-[skill-router] Models: sonnet · sonnet
-[skill-router] Invoke step 1/2 now:
-
-▶ superpowers:verification-before-completion  (sonnet, in-session)
-▶ vercel:deploy  (sonnet, in-session)
-```
-
-The verification gate runs every time before deploy fires — without you remembering to ask.
-
-## Install — one curl, 10 seconds
+## Install
 
 ```bash
-mkdir -p ~/.claude/skills/skill-router
-curl -sL https://raw.githubusercontent.com/hussi9/skill-router/main/SKILL.md \
-  > ~/.claude/skills/skill-router/SKILL.md
+git clone https://github.com/hussi9/skill-router ~/devpro/skill-router
+ln -s ~/devpro/skill-router ~/.claude/skills/skill-router
+python3 ~/.claude/skills/skill-router/scripts/install_hooks.py     # wires 6 hook events into ~/.claude/settings.json
+python3 ~/.claude/skills/skill-router/scripts/build_catalog.py
+python3 ~/.claude/skills/skill-router/scripts/build_index.py --enrich
 ```
 
-Done. Claude Code auto-loads it on session start. **You never invoke it manually.** Start a new Claude Code session and type any non-trivial task — the chain announcement fires before any tool runs.
+Optional, for the small-model stage: put `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) in the environment, or in Doppler (`shared/prd`) and let `scripts/refresh_env.py` cache it. Without a key the router is lexical-only and still routes.
 
-## Verify it's working
+Restart Claude Code. The catalog, index and learner rebuild in the background at every session start.
 
-In a new Claude Code session, type something obviously multi-domain like:
+## Verify
 
-> *"add user profile page that saves to the database"*
-
-You should see Claude announce a chain *before* reading any files:
-
-```
-[skill-router] This touches 2 domains: UI/Frontend, DB schema.
-[skill-router] Chain: superpowers:writing-plans → frontend-design:frontend-design + db-expert
-[skill-router] Models: sonnet · sonnet+sonnet  ·  Thinking: think
-[skill-router] Invoke step 1/2 now:
-
-▶ superpowers:writing-plans  (sonnet, in-session)
-▶ frontend-design:frontend-design + db-expert  (sonnet, parallel via Agent)
+```bash
+python3 ~/.claude/skills/skill-router/scripts/doctor.py
 ```
 
-If Claude jumps straight into reading files with no `[skill-router]` lines, the skill didn't load — verify `~/.claude/skills/skill-router/SKILL.md` exists and starts with `name: skill-router`.
+Twelve checks: hooks wired, scripts present, no route names an uninstalled skill, catalog and index fresh, model stage status, sub-agent hand-off hook, no expired demotions, agents follow the session model, learned overlay fresh, smoke prompts routed. Then type any non-trivial task in a new session and look for `[skill-router]` before the first tool call.
 
-## Optional — statusline shows live activity
+A route looked wrong? See the ranking and why:
 
-Add the statusline + hook (5 minutes — see [docs/customizing.md](./docs/customizing.md)) to surface routing in real time:
-
+```bash
+python3 ~/.claude/skills/skill-router/scripts/index_match.py --all "the prompt"
 ```
-◆ sonnet · ~/myproject · ⎇ main · 🔀 router · ▶ ship-feature 2/4 ✦saved · 🧠 hard · ⚙ frontend-design ✓ · ▓▓░░ 18% · $0.04
-```
-
-| Segment | Meaning |
-|---|---|
-| `🔀 router` | router currently routing your prompt |
-| `🔀 R5` | router has fired 5 times this session |
-| `▶ ship-feature 2/4` | chain mid-flight, on step 2 of 4 |
-| `✦saved` | this chain came from a saved chain in your `SKILL.personal.md` |
-| `🧠 hard` | extended-thinking step in flight |
-| `⚙ frontend-design ✓` | last skill (✓ = router upgraded it via catalog check) |
 
 ## Measured
 
-20 real prompts through `claude -p` (test harness in [`run_routing_test.sh`](./run_routing_test.sh)). 3-run average on Sonnet 4.6, 2026-04-29:
+`tests/calibration.py`, 109 curated prompts, lexical stage only (model stage off for determinism):
 
-| | Score |
+| | v3 (2026-09-07 morning) | v4 |
+|---|---|---|
+| Path accuracy | 95.4 % | **99.1 %** |
+| Skill accuracy (when path correct) | 64.2 % | **100 %** |
+| Silent on 10 real prompts from one week | 4 | **0** |
+| Lexical stage, end to end | — | 80 ms |
+| `SKILL.md` loaded per invocation | 2,388 words | 483 words |
+
+The calibration set is curated and encodes the author's expectations; read 99.1 % as "the regressions are gone", not as a field rate. The field number is the follow rate the learner computes over live sessions, baseline 17 % on `writing-plans` under v3.
+
+## Customize
+
+- **Project routes and projects** — `SKILL.personal.md`: `routes:` (name → skill, tier, gates) and `projects:` (aliases, skills, memory files, gates). Prove a route fires: `python3 scripts/router.py <<< "your prompt"`.
+- **Agent pairings** — `agent_skills.json`, validated against the index at brief time.
+- **Synonyms and phrases** — `scripts/index_match.py` (`SYNONYMS`, `PHRASES`, `GENERIC`).
+- **Escape hatches** — the user writes `[no-router]`; the model runs `scripts/router_override.py "<reason>"`.
+
+[docs/customizing.md](./docs/customizing.md) has the long form.
+
+## It learns
+
+`scripts/learn.py` regenerates `~/.claude/skill_router_learned.json` every session start — never the repo, never your personal file:
+
+| Learned | Surfaces as |
 |---|---|
-| Path routing only | 18/20 (**90%**) |
-| Path + Skill + Model all correct | 16/20 (**80%**) |
-| Model selection only | 19–20/20 (**95–100%**) |
+| Follow rates (announced vs invoked, joined by prompt id) | skills you routinely ignore stop leading routes |
+| Keyword → skill triggers | `Learned from your history: prompts with testflight usually use scrollbook-deploy` |
+| Handovers and chains | `After writing-plans you usually run test-driven-development` |
+| Soft-skips per skill (v4) | demotion signal for soft routes |
+| Skills unused for 90 days (v4) | the next archive pass |
 
-Known stable misroute (same case fails every run):
-- Ambiguous "fix X AND add Y" → routes to OPERATE instead of defaulting to BUILD per the ambiguity rule
-
-This is a systematic gap in how Claude follows the routing table — not random variance.
+Prompt *keywords* are logged, never prompt text. `SKILL_ROUTER_NO_LEARN=1` logs nothing. Details: [docs/self-improvement.md](./docs/self-improvement.md).
 
 ## Common questions
 
-**Will this slow Claude Code down?**
-~5 seconds of routing thought before tool calls fire. Saves time overall by avoiding wrong-skill rabbit holes.
+**Will this slow Claude Code down?** The lexical stage is ~80 ms. The model stage fires on low-confidence prompts only, ~1 s, cached by prompt hash. Hook timeout is 12 s so a slow network degrades to lexical rather than to a blocked prompt.
 
-**Do I need other skills installed first?**
-No, but the router is most useful with [superpowers](https://github.com/obra/superpowers) + a catalog like [Antigravity](https://github.com/sickn33/antigravity-awesome-skills) installed. The router still routes correctly on a bare install — it just has fewer specialists to dispatch to.
+**Why Gemini inside a Claude tool?** `claude -p` inside a hook re-enters every hook and MCP server on the machine — measured at 3.5 minutes. The classification is ~60 tokens. Provider order is Anthropic Haiku → Gemini Flash-Lite; whichever key works first answers.
 
-**Can I turn it off temporarily?**
-Yes — `mv ~/.claude/skills/skill-router/SKILL.md ~/.claude/skills/skill-router/SKILL.md.off` and restart Claude Code. Move it back to re-enable. There's no global toggle by design (zero UX).
+**Can I turn it off?** For one message, write `[no-router]`. For good, `python3 scripts/install_hooks.py --remove`.
 
-**Does this work on claude.ai or only Claude Code?**
-Claude Code (CLI) is production. The Codex flavor in [`codex-skill/`](./codex-skill/skill-router/) is a working draft. Web claude.ai doesn't load skills the same way — not supported.
+**What about my custom skills?** They are exactly what v4 is for. Anything under `~/.claude/skills/`, `~/.claude/commands/`, project `.claude/skills/`, and every installed plugin is indexed. Non-invokable catalogs (`~/.agent/skills`, `~/.composio-skills`) are install candidates only.
 
-**What about my custom skills?**
-The router checks `~/.claude/skills/`, `~/.agent/skills/`, and `~/.composio-skills/` on every task — your custom skills get used automatically when their name or description matches the task signature. See [references/catalog-check.md](./references/catalog-check.md).
-
-**How do I add my own routing rules?**
-Copy `SKILL.personal.md` to `~/.claude/skills/skill-router/SKILL.personal.md` and edit. Project-specific rules layer on top of the universal core (CSS-cascade model). See [docs/customizing.md](./docs/customizing.md).
-
-**Where does it log activity?**
-`~/.claude/skill_usage.log` (every Skill fire) and `~/.claude/skill_router_log.jsonl` (chain announcements + thinking events). Useful for debugging and for the statusline.
-
-**Does it get smarter over time?**
-Yes — run `bash scripts/weekly-analysis.sh` (or automate it via launchd/crontab) to surface routing gaps and promote repeated chains to named chains. Named chains bypass LLM triage entirely — faster and 100% consistent. See [docs/self-improvement.md](./docs/self-improvement.md).
-
-## Self-improvement — the router learns your patterns
-
-Three analysis scripts ship with the repo. Run them weekly and the router improves automatically:
-
-| Script | What it measures | What to do with it |
-|---|---|---|
-| `scripts/learn-from-history.py` | Announced skills vs actually invoked | Tighten patterns with false positives; broaden patterns for missed triggers |
-| `scripts/audit-dispatch.py` | Chain steps announced vs logged | Fix dispatch protocol gaps |
-| `scripts/learn-chains.py --apply` | Chains you've run 3+ times | Promotes them to named chains — no LLM triage, zero variance |
-
-Run all three at once:
-```bash
-bash scripts/weekly-analysis.sh           # report only
-bash scripts/weekly-analysis.sh --apply   # also promote repeated chains
-```
-
-Automate it (macOS launchd — runs every Monday at 9am):
-```bash
-REPO="$HOME/path/to/skill-router"
-sed -e "s|{{SKILL_ROUTER_PATH}}|$REPO|g" -e "s|{{HOME}}|$HOME|g" \
-    "$REPO/setup/launchd-weekly.plist" \
-    > ~/Library/LaunchAgents/com.skill-router.weekly-analysis.plist
-launchctl load ~/Library/LaunchAgents/com.skill-router.weekly-analysis.plist
-```
-
-Full details, Linux crontab instructions, and what to do when each metric is bad: [docs/self-improvement.md](./docs/self-improvement.md).
+**Where does it log?** `~/.claude/skill_usage.log` (every Skill call) and `~/.claude/skill_router_log.jsonl` (announcements, prompts as keywords, invocations, soft-skips). Both feed the learner; both are hook-mode only, so tests and probes never teach the router.
 
 ## Documentation
 
-| Doc | What you'll learn | Length |
-|---|---|---|
-| [docs/how-it-works.md](./docs/how-it-works.md) | The 4-step routing pipeline | ~5 min |
-| [docs/customizing.md](./docs/customizing.md) | Personal overrides + named chains | ~3 min |
-| [docs/self-improvement.md](./docs/self-improvement.md) | Weekly analysis, named chain promotion, cron setup | ~5 min |
-| [docs/proof.md](./docs/proof.md) | Real-session screenshots | ~2 min |
-
-Reference (router consults these at runtime): [`references/`](./references/).
+| Doc | What you'll learn |
+|---|---|
+| [docs/v4-design.md](./docs/v4-design.md) | The audit that motivated v4, the design, the deliverables |
+| [docs/how-it-works.md](./docs/how-it-works.md) | The pipeline, ranking rules, tiers, sub-agent hand-off |
+| [docs/customizing.md](./docs/customizing.md) | Personal routes, projects, named chains |
+| [docs/self-improvement.md](./docs/self-improvement.md) | What the learner computes and how it surfaces |
+| [references/routing-tables.md](./references/routing-tables.md) | The process tables, announcement format, dispatch protocol |
+| [docs/proof.md](./docs/proof.md) | Real-session screenshots |
 
 ## Works with
 
-| Source | Skills | How router uses it |
+| Source | Skills | How the router uses it |
 |---|---|---|
-| [superpowers](https://github.com/obra/superpowers) | process discipline | routing table |
-| [Antigravity](https://github.com/sickn33/antigravity-awesome-skills) | 1,400+ domain skills | catalog check |
-| [Composio](https://github.com/ComposioHQ) | 940+ integrations | catalog check |
-| [anthropics/skills](https://github.com/anthropics/skills) | official examples | catalog check |
-| [intellectronica/agent-skills](https://github.com/intellectronica/agent-skills) | `ultrathink`, deep-thinking | catalog check |
-| your custom `~/.claude/skills/` | whatever you install | catalog check |
-
-## Two flavors
-
-| | Where | Status |
-|---|---|---|
-| Claude Code | [`SKILL.md`](./SKILL.md) | Production |
-| Codex | [`codex-skill/skill-router/`](./codex-skill/skill-router/) | Working draft |
+| [superpowers](https://github.com/obra/superpowers) | process discipline | the process leg of every route |
+| Claude Code plugins (`~/.claude/plugins`) | frontend-design, supabase, vercel, … | indexed, invokable |
+| your `~/.claude/skills/` | whatever you build | indexed, invokable, project-aware |
+| [Antigravity](https://github.com/sickn33/antigravity-awesome-skills), [Composio](https://github.com/ComposioHQ) | 2,300+ | install candidates only |
 
 ## Project
 
 - [CHANGELOG.md](./CHANGELOG.md) — version history
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — how to propose changes (TL;DR: routing-table corrections welcome, lifecycle features go to a different repo)
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — how to propose changes
 - [LICENSE](./LICENSE) — MIT
+- `bash scripts/check.sh` — syntax · unit tests · calibration gate (≥ 95 %) · doctor
