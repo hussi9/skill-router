@@ -242,5 +242,43 @@ class TestCatalogBuilder(unittest.TestCase):
         self.assertEqual(build_catalog.parse_frontmatter("# Just a heading\n"), {})
 
 
+class TestDisabledPlugins(unittest.TestCase):
+    """A disabled plugin's files stay in the cache; its skills must not be indexed."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="catalog-plugins-"))
+        self._cache, self._settings = build_catalog.PLUGINS_CACHE, build_catalog.SETTINGS
+        for plugin in ("alpha", "beta", "gamma"):
+            d = self.tmp / "cache" / "market" / plugin / "1.0.0" / "skills" / f"{plugin}-skill"
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(f"---\nname: {plugin}-skill\ndescription: does {plugin}\n---\n")
+        build_catalog.PLUGINS_CACHE = self.tmp / "cache"
+        build_catalog.SETTINGS = self.tmp / "settings.json"
+
+    def tearDown(self) -> None:
+        build_catalog.PLUGINS_CACHE, build_catalog.SETTINGS = self._cache, self._settings
+
+    def names(self) -> list[str]:
+        return sorted(e["name"] for e in build_catalog.scan_plugins()[0])
+
+    def test_false_is_skipped_true_and_unmentioned_are_kept(self) -> None:
+        build_catalog.SETTINGS.write_text(json.dumps(
+            {"enabledPlugins": {"alpha@market": False, "beta@market": True}}))
+        self.assertEqual(self.names(), ["beta:beta-skill", "gamma:gamma-skill"])
+
+    def test_same_plugin_name_in_another_marketplace_is_not_disabled(self) -> None:
+        build_catalog.SETTINGS.write_text(json.dumps({"enabledPlugins": {"alpha@elsewhere": False}}))
+        self.assertIn("alpha:alpha-skill", self.names())
+
+    def test_unreadable_settings_disable_nothing(self) -> None:
+        for body in (None, "{not json", json.dumps({"enabledPlugins": "nope"})):
+            if body is None:
+                build_catalog.SETTINGS.unlink(missing_ok=True)
+            else:
+                build_catalog.SETTINGS.write_text(body)
+            self.assertEqual(len(self.names()), 3, body)
+
+
 if __name__ == "__main__":
     unittest.main()

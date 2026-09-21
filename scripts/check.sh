@@ -28,7 +28,8 @@ done
 echo "  all python files parse"
 
 step "Unit tests"
-python3 -m pytest tests/test_router.py tests/test_catalog_match.py tests/test_hooks.py tests/test_learn.py -q \
+python3 -m pytest tests/test_router.py tests/test_catalog_match.py tests/test_hooks.py tests/test_learn.py \
+  tests/test_index_match.py tests/test_router_v4.py tests/test_jev_choose.py -q \
   || fail "unit tests"
 
 if [ "$QUICK" = "0" ]; then

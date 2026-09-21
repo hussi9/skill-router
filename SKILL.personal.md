@@ -85,8 +85,11 @@ routes:
 
 
 
+  # Triggers are authoring phrases only. Naming the router ("skill-router",
+  # "routing table") is not skill authoring — that carded every status message
+  # about the router with writing-skills on 2026-09-21.
   - name: skill-system
-    when: ["skill-router", "skill router", "routing table", "write a skill", "skill catalog"]
+    when: ["write a skill", "write a new skill", "create a skill", "create a new skill", "author a skill", "edit the skill.md", "rewrite the skill.md", "skill description"]
     skill: superpowers:writing-skills
     path: BUILD
     thinking: think
@@ -169,8 +172,8 @@ projects:
     memory: ["marketing_ops_platform", "adops_ads_mcp_wiring", "deenunlock_ads_kit"]
     gates: []
   skill-system:
-    aliases: ["skill-router", "skill router", "routing", "skill catalog"]
-    skills: ["skill-router", "superpowers:writing-skills"]
+    aliases: ["skill-router", "skill router", "skill catalog"]
+    skills: ["skill-router"]
     memory: ["claude-setup-cleanup-2026-09-06"]
     gates: ["scripts/check.sh green"]
 ```
@@ -221,6 +224,45 @@ DEPLOY:    tests green locally · verification-before-completion invoked
 
 ---
 
+## EXPLICIT CHAIN INVOCATION — `/skill-router <chain-name> <details>`
+
+Keyword matching is a guess about intent. Sometimes there is no guessing to
+do: the user knows which chain they want and says so. Support that.
+
+When this skill is invoked with arguments, read the first token as a chain
+name and everything after it as the task:
+
+```
+/skill-router product-vision-review a Spotify-style app for Urdu poetry
+                                    where users build and share playlists
+   ^ chain name                      ^ the task every step receives
+```
+
+**Resolution order.** Exact match on a `name:` in the `chains:` block below
+wins. If the first token matches no chain, treat the WHOLE argument as an
+ordinary prompt and route it normally — a user typing
+`/skill-router help me fix this build` should get routing, not an error
+about "help" not being a chain.
+
+**Running it.** Announce the chain and its steps, then execute them in
+order: `→` is sequential (each step sees the previous step's output), `+`
+is parallel (independent lenses, dispatched together, none waits for
+another). Pass the task text to every step verbatim — a step that receives
+a summary of the task instead of the task tends to answer a slightly
+different question, and in a convergence chain those drifts compound.
+
+**Why this is worth having.** Keyword triggers fire on the words a user
+happened to use, which means the most deliberate requests — the ones where
+someone has thought about what they want — are the ones most likely to miss
+a chain, because considered phrasing rarely matches a trigger list. Explicit
+invocation also makes chains discoverable: a user who reads the block below
+can run any of them without reverse-engineering its triggers.
+
+`/skill-router chains` with no further argument lists the available chains
+and their triggers.
+
+---
+
 ## NAMED CHAINS — read by you, not by the parser
 
 These are sequences worth remembering. They are documentation: the router does
@@ -240,4 +282,20 @@ chains:
   - name: design-pass
     when: ["design pass", "make it look right"]
     chain: frontend-design:frontend-design → design-review → ui-review
+
+  # A product VISION is not a build task. Answering it with technical
+  # feasibility alone is the failure this chain exists to prevent: on
+  # 2026-09-07 a Spotify-for-shayari vision got a "yes, here is the
+  # architecture" answer with no moat, no PMF, no pricing, and only a
+  # footnote on the thing that was actually blocking it — whether 4,500
+  # editorial fields could be authored at all.
+  # Run the four independent lenses in parallel (they do not need each
+  # other's output), then converge in steering-meeting, which is built to
+  # surface where lenses DISAGREE rather than average them into mush.
+  - name: product-vision-review
+    when: ["product vision", "should we build", "is this worth building",
+           "new product idea", "product direction", "pivot to", "what if we built"]
+    chain: office-hours + market-competitors + market-pricing + content-feasibility → steering-meeting
+    model: opus
+    thinking: ultrathink
 ```

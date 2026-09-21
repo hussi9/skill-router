@@ -39,9 +39,9 @@ The user can also write `[no-router]` in their message.
 ## How the card is decided
 
 1. **Project route** in `SKILL.personal.md` (`@economicalai`, `capgo`, …) — deterministic.
-2. **Enriched index** of every invokable skill (`~/.claude/skill_index.json`): name, "use when" triggers, keywords, project aliases. Lexical rank, ~50 ms.
-3. **Small model** (Gemini Flash-Lite, ~1 s, cached) settles low-confidence ties.
-4. **Process table** (`references/routing-tables.md`) supplies the second leg.
+2. **Jev** (TypeSafe System One, `jev_choose.py`, ~0.4 s, cached) reads the whole enriched index (`~/.claude/skill_index.json`) in one call — no lexical pre-filter, so typos do not matter — and answers two Choice questions: domain skill, process skill. Confidence ≥ 0.8 routes; anything lower is silence (a 0.5–0.8 `Possible fit:` line exists behind `SKILL_ROUTER_JEV_SUGGEST=1`, off by default — it was right one time in three). When Jev answers, only Jev puts a skill on the card; a skill already loaded this session is never carded again.
+3. **Fallback** when Jev fails or passes 1.2 s: lexical rank of the index (~50 ms), then a small model (Gemini Flash-Lite, ~1 s, cached) over the top candidates.
+4. **Process table** (`references/routing-tables.md`) supplies the process leg on the fallback path only.
 
 Questions, discussion and harness noise get no card. Silence is an answer.
 

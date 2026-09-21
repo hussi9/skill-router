@@ -237,6 +237,23 @@ def check_llm_stage(r: Report) -> None:
             "python3 scripts/refresh_env.py --verbose (needs Doppler)")
 
 
+def check_jev_stage(r: Report) -> None:
+    """Advisory: Jev is the first chooser; without its key the lexical + Gemini path runs."""
+    try:
+        import jev_choose  # type: ignore[import-not-found]
+        st = jev_choose.status()
+    except Exception as exc:
+        r.check("jev chooser", True, f"module unavailable ({exc}); lexical + small model", "")
+        return
+    if not st.get("enabled"):
+        r.check("jev chooser", True, "disabled by SKILL_ROUTER_JEV=0", "")
+        return
+    detail = (f"{st['model']} · {st['index_entries']} index entries in "
+              f"{st['domain_questions']} domain question(s) · {st['cache_entries']} cached answers"
+              if st.get("key") else "no TYPESAFE_API_KEY cached — lexical + small model only")
+    r.check("jev chooser", True, detail, "python3 scripts/refresh_env.py --verbose (needs Doppler)")
+
+
 def check_task_hook(r: Report) -> None:
     """v4: the Task/Agent PreToolUse hook is how the parent's route reaches sub-agents."""
     try:
@@ -437,6 +454,7 @@ def main() -> int:
     check_no_ghosts(r)
     check_catalog(r)
     check_index(r)
+    check_jev_stage(r)
     check_llm_stage(r)
     check_task_hook(r)
     check_deferrals(r)

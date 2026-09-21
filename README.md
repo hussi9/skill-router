@@ -38,8 +38,11 @@ The routing table could never enumerate the domain skills — they change weekly
 
 ```
 prompt ──► project route (SKILL.personal.md)          deterministic, wins outright
-       ──► enriched index rank (skill_index.json)     ~80 ms, name · use_when · keywords · project aliases
-       ──► small-model tie-break (Gemini Flash-Lite)  only below 35 % margin, ~1 s, cached
+       ──► Jev over the whole index (jev_choose.py)    ~0.4 s, two Choice questions, no pre-filter;
+                                                      ≥ 0.8 route · below: silent (0.5–0.8 suggestion line is opt-in)
+       ──► on Jev failure / 1.2 s timeout:
+             enriched index rank (skill_index.json)     ~80 ms, name · use_when · keywords · project aliases
+             small-model tie-break (Gemini Flash-Lite)  only below 35 % margin, ~1 s, cached
        ──► path (BROKEN / BUILD / OPERATE) + process leg from the table
        ──► route card: domain skill · process skill · gates · memory · tier
 ```

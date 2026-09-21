@@ -95,9 +95,10 @@ def managed_hooks() -> dict[str, list[dict]]:
                 '[ -z "$out" ] && exit 0; '
                 'jq -n --arg msg "$out" \'{systemMessage: $msg, hookSpecificOutput: '
                 '{hookEventName: "UserPromptSubmit", additionalContext: $msg}}\'',
-                # Lexical routing is ~50 ms; the small-model tie-break adds
-                # ~1 s and is itself capped at 6 s. 12 leaves headroom for a
-                # slow network without ever approaching the 30 s event cap.
+                # Lexical routing is ~50 ms; Jev answers in ~0.4 s and is cut
+                # off at 1.2 s; the small-model tie-break (~1 s, capped at 6 s) runs
+                # only when Jev errors, never after a timeout. Worst case ~7 s, so 12 leaves
+                # headroom without ever approaching the 30 s event cap.
                 12,
                 "Run the deterministic router and inject the [skill-router] "
                 "announcement as context before the model's first action.",

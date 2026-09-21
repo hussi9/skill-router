@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -98,6 +99,24 @@ def handover_nudge(skill: str) -> str:
     return ""
 
 
+def record_loaded(skill: str, payload: dict) -> None:
+    """Append to this session's loaded-skills file; router.py reads it so it
+    never cards a skill whose body is already in context. Sub-agent loads do
+    not count: their context is not the parent's."""
+    sid = str(payload.get("session_id") or "").strip()
+    if not sid or payload.get("agent_id"):
+        return
+    session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR")
+                       or Path.home() / ".claude" / "skill_router_session")
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)[:80]
+    try:
+        session_dir.mkdir(parents=True, exist_ok=True)
+        with (session_dir / f"{safe}.loaded").open("a") as f:
+            f.write(skill + "\n")
+    except OSError:
+        pass
+
+
 def log_usage(skill: str) -> None:
     try:
         USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -147,6 +166,7 @@ def main() -> int:
         return 0
     log_usage(skill)
     log_invoke_event(skill, payload)
+    record_loaded(skill, payload)
     satisfy_pending(skill)
     rearm(skill)
     # Sub-agents already got their brief at SubagentStart; a second nudge

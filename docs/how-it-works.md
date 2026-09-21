@@ -15,6 +15,17 @@ You type a task
      │               use_when triggers, keywords, project aliases (build_index.py,
      │               enrichment cached per skill version). index_match.py ranks it.
      ▼
+[1a] Jev chooses     jev_choose.py sends EVERY routable index entry to Jev (TypeSafe System One,
+     │               jev-1.13.0) as two Choice questions — domain skill, process skill — plus a
+     │               path question. No lexical pre-filter: on real prompts the right skill was in
+     │               the lexical top 30 only 23 times in 66, because typos defeat token matching.
+     │               ≥ 0.8 routes · below that, silent. (0.5–0.8 "Possible fit:" is opt-in:
+     │               SKILL_ROUTER_JEV_SUGGEST=1.) When Jev answers, the regex table adds nothing,
+     │               and a skill already loaded this session is never carded again.
+     │               Slash commands, builtins and agents are never offered. Short prompts
+     │               (≤ 15 words) also carry the last 300 chars of the previous assistant turn.
+     │               Hook turns only; any failure or 1.2 s timeout falls through to [2].
+     ▼
 [2] Confident?       margin ≥ 35 % and a distinctive token in name/triggers/keywords
      │ no  ──────►   [2b] Gemini Flash-Lite picks among the top 5 (llm_classify.py, cached)
      ▼

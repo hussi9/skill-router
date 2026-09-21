@@ -290,6 +290,30 @@ def scan_agents(root: Path, source: str, prefix: str = "") -> Iterable[dict]:
         }
 
 
+SETTINGS = HOME / ".claude" / "settings.json"
+
+
+def disabled_plugins(settings: Optional[Path] = None) -> frozenset[str]:
+    """`<plugin>@<marketplace>` keys that settings.json switches off.
+
+    The plugin cache keeps a disabled plugin's files on disk, so scanning the
+    cache alone lists skills the harness will refuse to load (vercel: 46
+    entries after it was disabled on 2026-09-21). A plugin settings.json does
+    not mention is treated as enabled. Unreadable settings disable nothing."""
+    try:
+        data = json.loads((settings or SETTINGS).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return frozenset()
+    flags = data.get("enabledPlugins") if isinstance(data, dict) else None
+    if not isinstance(flags, dict):
+        return frozenset()
+    return frozenset(k for k, v in flags.items() if v is False)
+
+
+def plugin_enabled(plugin: str, marketplace: str, off: frozenset[str]) -> bool:
+    return f"{plugin}@{marketplace}" not in off
+
+
 def scan_plugins() -> tuple[list[dict], list[dict]]:
     """Return (skill_entries, agent_entries) for the newest version of each plugin."""
     skills: list[dict] = []
@@ -300,11 +324,12 @@ def scan_plugins() -> tuple[list[dict], list[dict]]:
         owners = sorted(PLUGINS_CACHE.iterdir())
     except OSError:
         return skills, agents
+    off = disabled_plugins()
     for owner in owners:
         if not owner.is_dir():
             continue
         for plugin in sorted(owner.iterdir()):
-            if not plugin.is_dir():
+            if not plugin.is_dir() or not plugin_enabled(plugin.name, owner.name, off):
                 continue
             vdir = _newest_version_dir(plugin)
             if vdir is None:

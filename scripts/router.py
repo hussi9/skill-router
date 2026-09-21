@@ -189,6 +189,8 @@ OPERATE_RE = _re(
 # No length gate: a long discussion message is still a discussion.
 # Default for every prompt that doesn't match BROKEN/BUILD/OPERATE.
 SKIP_RE = _re(
+    # Harness text that arrives as a user turn: the skill it names is already loaded.
+    r"^\s*\(Re-invocation of /",
     # Anchored short questions (factual lookup / explanation)
     r"^\s*what does\b", r"^\s*what is\b", r"^\s*how does\b", r"^\s*how do i\b",
     r"^\s*explain\b", r"^\s*show me\b", r"^\s*where (is|are)\b",
@@ -1177,6 +1179,22 @@ ROUTED_SKILL_ALIASES: frozenset[str] = frozenset({
 
 
 @functools.lru_cache(maxsize=1)
+@functools.lru_cache(maxsize=1)
+def _plugins_off() -> frozenset[str]:
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import build_catalog  # type: ignore[import-not-found]
+        return build_catalog.disabled_plugins()
+    except Exception:
+        return frozenset()
+
+
+def _plugin_on(plugin: str, marketplace: str) -> bool:
+    """A disabled plugin stays in the cache on disk; its skills and agents
+    must not count as installed."""
+    return f"{plugin}@{marketplace}" not in _plugins_off()
+
+
 def _builtin_skills() -> frozenset[str]:
     """Skills the Claude Code binary ships with.
 
@@ -1245,7 +1263,7 @@ def _skill_catalog() -> Optional[set[str]]:
                 if not repo_dir.is_dir():
                     continue
                 for plugin_dir in repo_dir.iterdir():
-                    if not plugin_dir.is_dir():
+                    if not plugin_dir.is_dir() or not _plugin_on(plugin_dir.name, repo_dir.name):
                         continue
                     plugin_name = plugin_dir.name
                     for version_dir in plugin_dir.iterdir():
@@ -1301,7 +1319,7 @@ def _agent_catalog() -> Optional[set[str]]:
                 if not repo.is_dir():
                     continue
                 for plugin in repo.iterdir():
-                    if not plugin.is_dir():
+                    if not plugin.is_dir() or not _plugin_on(plugin.name, repo.name):
                         continue
                     for version in plugin.iterdir():
                         for root in (version / "agents", version / ".claude" / "agents"):
@@ -1391,7 +1409,32 @@ def _drop_soft(chain: list[Step]) -> list[Step]:
     (>= STRIKE_THRESHOLD silent misses) or reasoned-override mode
     (>= OVERRIDE_THRESHOLD explicit corrections). Silent: no announcement, no
     enforcement, no log noise. Returns a new list; original untouched."""
-    return [s for s in chain if not is_deferred(s.skill)]
+    return [s for s in chain
+            if not is_deferred(s.skill) and s.skill != SELF_SKILL and s.skill not in LOADED]
+
+
+# The router's own skill was the single most-loaded skill while it ran (46 of
+# 215 loads): a personal `projects:` entry listed it, so any prompt saying
+# "routing" pulled ~2.5k tokens of router documentation into the session.
+SELF_SKILL = "skill-router"
+
+# Skills already loaded in this session (skill_invoked.py records them). A
+# skill body stays in context once loaded, so a second card for it buys
+# nothing and costs the card plus, if obeyed, the body again. main() fills it.
+LOADED: frozenset[str] = frozenset()
+
+
+def loaded_this_session(meta: dict) -> frozenset[str]:
+    sid = str((meta or {}).get("session_id") or "").strip()
+    if not sid:
+        return frozenset()
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)[:80]
+    session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR") or SESSION_DIR)
+    try:
+        lines = (session_dir / f"{safe}.loaded").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return frozenset()
+    return frozenset(x.strip() for x in lines if x.strip())
 
 
 # ---- Learned overlay consumers -----------------------------------------------
@@ -1474,6 +1517,7 @@ LAST_CARD = RouteCard()
 SESSION_DIR = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR")
                    or Path.home() / ".claude" / "skill_router_session")
 DEFAULT_SOFT_PATHS = ("BUILD", "OPERATE")
+CARD_MAX_CHARS = 1000               # ~250 tokens
 
 
 def _tier_for(path: str, gates: tuple[str, ...], explicit: str = "",
@@ -1493,10 +1537,14 @@ def _finish(path: str, chain: list[Step], domains: list[str],
             ) -> tuple[str, list[Step], list[str], str]:
     """Render an announcement and bolt the advisory lines onto it."""
     global LAST_CARD
+    # A route that names an archived or disabled agent (integration-specialist
+    # went to .archive/ on 2026-09-14) keeps its skill and runs in-session.
+    chain = [s if valid_agent(s.agent) else Step(s.skill, "general-purpose", s.model, s.thinking)
+             for s in chain]
     LAST_CARD = card or RouteCard(tier=_tier_for(path, ()))
     LAST_CARD.path = path
     LAST_CARD.primary = chain[0].skill if chain else ""
-    announcement = render(path, chain, domains, note=note)
+    announcement = base = render(path, chain, domains, note=note)
     if not announcement:
         return path, chain, domains, ""
     # The v4 index puts the domain skill *in* the chain, so the specialist
@@ -1515,6 +1563,11 @@ def _finish(path: str, chain: list[Step], domains: list[str],
     if flow and len(chain) == 1:
         announcement += ("\n[skill-router] Your usual flow from here: "
                          + " → ".join(flow[1:]) + "  (learned; advisory)")
+    # Every injected character is re-read on every later turn of the session.
+    # The card proper is ~140 tokens; if the advisory lines push it past the
+    # cap, they go and the card stays.
+    if len(announcement) > CARD_MAX_CHARS:
+        announcement = base
     return path, chain, domains, announcement
 
 
@@ -1553,6 +1606,11 @@ def _llm_decide(prompt: str, res) -> Optional[dict]:
         return None
     if len(prompt.split()) < 4:
         return None
+    # A prompt that already waited out a Jev timeout gets the 50 ms lexical
+    # answer and nothing slower: stacking a ~1 s (cap 6 s) second model call
+    # on top of the wait is how a typing pause becomes a stall.
+    if JEV_TIMED_OUT:
+        return None
     try:
         import llm_classify  # type: ignore[import-not-found]
         import index_match  # type: ignore[import-not-found]
@@ -1570,6 +1628,165 @@ def _llm_decide(prompt: str, res) -> Optional[dict]:
         return llm_classify.classify(prompt, cands, projects)
     except Exception:
         return None
+
+
+# ---- v4.1: Jev chooses over the whole index ----------------------------------
+#
+# The lexical rank above feeds the small model a top-8 that held the right
+# skill 23 times in 66 on real prompts (typos defeat token matching), so the
+# tie-break never had a chance. Jev reads every indexed skill in one call and
+# needs no pre-filter. See scripts/jev_choose.py and docs/jev-eval-2026-09-21/.
+
+PREV_ASSISTANT = ""                 # tail of the previous assistant turn; main() sets it
+JEV_TIMED_OUT = False               # this prompt already spent its network budget waiting
+TRANSCRIPT_TAIL_BYTES = 256_000
+
+
+def _jev_active() -> bool:
+    """Real hook turns only, like the embedder rescue: tests, calibration and
+    doctor probes must stay offline and deterministic. SKILL_ROUTER_JEV=1
+    opts a manual probe in; =0 (or SKILL_ROUTER_LLM=0) turns it off."""
+    flag = os.environ.get("SKILL_ROUTER_JEV", "")
+    if flag in ("0", "off", "false"):
+        return False
+    if os.environ.get("SKILL_ROUTER_LLM", "1") in ("0", "off", "false"):
+        return False
+    return flag == "1" or os.environ.get("SKILL_ROUTER_HOOK_MODE") == "1"
+
+
+def _jev_decide(prompt: str):
+    """jev_choose.Choice, or None — None means "use the lexical + Gemini path"."""
+    if not _jev_active():
+        return None
+    global JEV_TIMED_OUT
+    JEV_TIMED_OUT = False
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import jev_choose  # type: ignore[import-not-found]
+        got = jev_choose.choose(prompt, context=PREV_ASSISTANT)
+        JEV_TIMED_OUT = got is None and jev_choose.LAST_FAILURE == "timeout"
+        return got
+    except Exception:
+        return None
+
+
+def previous_assistant_tail(meta: dict, chars: int = 300) -> str:
+    """Last `chars` of the assistant text that preceded this prompt, read from
+    the tail of the hook's transcript. Lets "yes please continue" be judged
+    against what it answers. Empty on any problem."""
+    tp = meta.get("transcript_path") if isinstance(meta, dict) else None
+    if not tp:
+        return ""
+    try:
+        with open(tp, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - TRANSCRIPT_TAIL_BYTES))
+            lines = fh.read().decode("utf-8", errors="ignore").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        if '"type":"assistant"' not in line and '"type": "assistant"' not in line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue                                   # first line of the window may be cut
+        if ev.get("type") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = (ev.get("message") or {}).get("content")
+        if isinstance(content, str):
+            text = content
+        else:
+            text = "\n".join(p.get("text", "") for p in content or []
+                             if isinstance(p, dict) and p.get("type") == "text")
+        if text.strip():
+            return text.strip()[-chars:]
+    return ""
+
+
+def _suggestions_on() -> bool:
+    """The 0.5-0.8 "Possible fit:" tier is built but OFF by default. Measured:
+    right 6 times in 18 on turns that did use a skill, and it would print on
+    35 % of turns that needed none. A one-in-three nudge toward a ~2.5k-token
+    skill body is not worth a line on a third of all prompts. Silence is free.
+    SKILL_ROUTER_JEV_SUGGEST=1 turns it on."""
+    return os.environ.get("SKILL_ROUTER_JEV_SUGGEST", "0") in ("1", "on", "true")
+
+
+def _suggestion_line(name: str, confidence: float) -> str:
+    return (f"[skill-router] Possible fit: Skill(skill=\"{name}\")  "
+            f"(jev {confidence:.2f}; advisory — not enforced)")
+
+
+def _route_from_jev(prompt: str, jev, res, domains: list[str],
+                    ) -> tuple[str, list[Step], list[str], str]:
+    """Build the route from a Jev answer.
+
+    >= 0.8 routes; 0.5-0.8 is printed as a suggestion with no pending state
+    and no rule; below that the pick is ignored and nothing replaces it.
+    Jev's QUESTION is never used to silence a turn: on real prompts that did
+    invoke a skill it said QUESTION 8 times in 126.
+    """
+    path = triage(prompt)
+    if path == "SKIP" and res.path in ("BROKEN", "BUILD", "OPERATE"):
+        path = res.path
+    if path == "SKIP" and jev.path in ("BROKEN", "BUILD", "OPERATE") and jev.path_confidence >= 0.5:
+        path = jev.path
+    by_name = {m.name: m for m in res.candidates}
+    suggestions: list[str] = []
+    chain: list[Step] = []
+    primary_kind, gates, memory = "process", (), ()
+    confidence = 0.0
+
+    def usable(pick) -> bool:
+        return (bool(pick.name) and valid_skill(pick.name) and not is_deferred(pick.name)
+                and pick.name != SELF_SKILL and pick.name not in LOADED)
+
+    d = jev.domain
+    if usable(d) and d.tier == "route":
+        if path == "SKIP":
+            path = "OPERATE"
+        m = by_name.get(d.name)
+        kind = m.kind if m is not None else "domain"
+        thinking = "think" if path in ("BROKEN", "BUILD") else "none"
+        chain.append(Step(d.name, _agent_for_kind(kind), "inherit", thinking))
+        primary_kind, confidence = kind, d.confidence
+        if m is not None:
+            gates, memory = tuple(m.gates), tuple(m.memory)
+    elif usable(d) and d.tier == "suggest":
+        suggestions.append(_suggestion_line(d.name, d.confidence))
+
+    # When Jev answers, only a >= 0.8 pick puts a skill on the card. The regex
+    # table's process leg is NOT a fallback here: on 150 real turns where no
+    # skill was needed it produced 25 of the 53 carded steps ("ok lets do it"
+    # -> writing-plans, "wtf ... why did you push" -> hard systematic-debugging)
+    # while Jev's own confidence on them sat between 0.25 and 0.79.
+    p = jev.process
+    if usable(p) and p.tier == "route":
+        if path == "SKIP":
+            path = "OPERATE"
+        known = next((s for s in _process_leg(path, prompt, domains) if s.skill == p.name), None)
+        thinking = "think" if path in ("BROKEN", "BUILD") else "none"
+        step = known or Step(p.name, "general-purpose", "inherit", thinking)
+        if all(step.skill != c.skill for c in chain):
+            chain.append(step)
+        confidence = confidence or p.confidence
+    elif usable(p) and p.tier == "suggest":
+        suggestions.append(_suggestion_line(p.name, p.confidence))
+
+    if not _suggestions_on():
+        suggestions = []
+    chain = _drop_soft([s for s in chain if valid_skill(s.skill)])
+    if not chain:
+        return "SKIP", [], domains, "\n".join(suggestions)
+    card = RouteCard(tier=_tier_for(path, gates), gates=gates, memory=memory,
+                     decided_by="jev", primary_kind=primary_kind,
+                     confidence=f"jev:{confidence:.2f}" if confidence else "table")
+    path, chain, domains, announcement = _finish(path, chain, domains, prompt, card=card)
+    if announcement and suggestions:
+        announcement += "\n" + "\n".join(suggestions)
+    return path, chain, domains, announcement
 
 
 def _agent_for_kind(kind: str) -> str:
@@ -1605,6 +1822,9 @@ def route_v4(prompt: str) -> Optional[tuple[str, list[Step], list[str], str]]:
     # The v3 regex triage keeps first refusal on the path: it knows
     # "CRITICAL: database corrupted" and "clean it up" are work even though
     # neither is phrased as a request. The index's path fills its silences.
+    jev = _jev_decide(prompt)
+    if jev is not None:
+        return _route_from_jev(prompt, jev, res, domains)
     path = triage(prompt)
     if path == "SKIP":
         path = res.path if res.path in ("BROKEN", "BUILD", "OPERATE") else "SKIP"
@@ -2108,6 +2328,9 @@ def main() -> int:
             print("[skill-router] (stand-down — explicit slash-command invocation)",
                   file=sys.stderr)
         return 0
+    global PREV_ASSISTANT, LOADED
+    PREV_ASSISTANT = previous_assistant_tail(hook_meta) if hook_mode else ""
+    LOADED = loaded_this_session(hook_meta) if hook_mode else frozenset()
     try:
         path, chain, domains, announcement = route(prompt)
     except Exception as e:

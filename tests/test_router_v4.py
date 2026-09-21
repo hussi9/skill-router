@@ -224,6 +224,190 @@ class TestSubagentHandoff(unittest.TestCase):
         self.assertIn("theaibill", json.loads(out)["hookSpecificOutput"]["additionalContext"])
 
 
+class TestJevRoute(unittest.TestCase):
+    """route_v4 with a Jev answer injected. No network: _jev_decide is replaced."""
+
+    def setUp(self) -> None:
+        self._decide = router._jev_decide
+        import jev_choose  # type: ignore[import-not-found]
+        self.jev = jev_choose
+
+    def tearDown(self) -> None:
+        router._jev_decide = self._decide
+
+    def answer(self, domain=(None, 0.0), process=(None, 0.0), path="OPERATE", pathc=0.9):
+        j = self.jev
+        choice = j.Choice(j.Pick(domain[0], domain[1], j.tier(domain[1])),
+                          j.Pick(process[0], process[1], j.tier(process[1])),
+                          path, pathc, 400, 15000)
+        router._jev_decide = lambda prompt: choice
+
+    def test_confident_domain_routes_despite_typos(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), process=(None, 0.9))
+        path, chain, _, text = router.route("my mcbook keps restaring evry nite pls chek")
+        self.assertEqual([s.skill for s in chain], ["mac-doctor"])
+        self.assertIn("▶ mac-doctor", text)
+        self.assertEqual(router.LAST_CARD.decided_by, "jev")
+        self.assertEqual(router.LAST_CARD.confidence, "jev:0.93")
+        self.assertNotEqual(path, "SKIP")
+
+    def test_middle_confidence_is_silent_unless_suggestions_are_switched_on(self) -> None:
+        self.answer(domain=("mac-doctor", 0.64), process=(None, 0.9))
+        os.environ.pop("SKILL_ROUTER_JEV_SUGGEST", None)
+        self.assertEqual(router.route("my mcbook keps restaring evry nite pls chek")[1:], ([], [], ""))
+
+    def test_middle_confidence_is_a_suggestion_not_a_route(self) -> None:
+        self.answer(domain=("mac-doctor", 0.64), process=(None, 0.9))
+        os.environ["SKILL_ROUTER_JEV_SUGGEST"] = "1"
+        self.addCleanup(os.environ.pop, "SKILL_ROUTER_JEV_SUGGEST", None)
+        path, chain, _, text = router.route("my mcbook keps restaring evry nite pls chek")
+        self.assertEqual((path, chain), ("SKIP", []))
+        self.assertIn('Possible fit: Skill(skill="mac-doctor")', text)
+        self.assertNotIn("IRON RULE", text)
+        self.assertNotIn("Soft route", text)
+        self.assertNotIn("▶", text)
+
+    def test_low_confidence_is_silent(self) -> None:
+        self.answer(domain=("mac-doctor", 0.31), process=(None, 0.9))
+        self.assertEqual(router.route("my mcbook keps restaring evry nite pls chek")[3], "")
+
+    def test_a_name_that_is_not_installed_is_dropped(self) -> None:
+        self.answer(domain=("no-such-skill-anywhere", 0.99), process=(None, 0.9))
+        path, chain, _, text = router.route("please run the imaginary skill on this repo")
+        self.assertEqual((path, chain, text), ("SKIP", [], ""))
+
+    def test_confident_process_pick_leads_when_no_domain(self) -> None:
+        self.answer(domain=(None, 0.9), process=("superpowers:brainstorming", 0.88), path="BUILD")
+        _, chain, _, text = router.route("lets think abuot how the onbording shuld work")
+        self.assertEqual([s.skill for s in chain], ["superpowers:brainstorming"])
+        self.assertIn("▶ superpowers:brainstorming", text)
+
+    def test_an_unsure_jev_does_not_bring_the_regex_table_back(self) -> None:
+        # Measured: on 150 no-skill turns the table leg made 25 of 53 carded steps.
+        prompt = "add tests for the payment webhook handler"
+        router._jev_decide = lambda p: None
+        self.assertTrue(router.route(prompt)[1], "the lexical fallback itself still routes this")
+        for conf in (0.3, 0.7, 0.95):
+            self.answer(domain=(None, 0.9), process=(None, conf))
+            self.assertEqual(router.route(prompt)[1], [], conf)
+
+    def test_never_cards_a_skill_already_loaded_this_session(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), process=("superpowers:systematic-debugging", 0.9),
+                    path="BROKEN")
+        prompt = "my mcbook keps restaring evry nite pls chek"
+        saved = router.LOADED
+        try:
+            router.LOADED = frozenset({"mac-doctor"})
+            _, chain, _, text = router.route(prompt)
+            self.assertEqual([s.skill for s in chain], ["superpowers:systematic-debugging"])
+            self.assertNotIn("mac-doctor", text)
+            router.LOADED = frozenset({"mac-doctor", "superpowers:systematic-debugging"})
+            self.assertEqual(router.route(prompt)[1:], ([], [], ""))
+        finally:
+            router.LOADED = saved
+
+    def test_loaded_file_round_trip_and_subagents_do_not_count(self) -> None:
+        sid = "sess-loaded-1"
+        run_hook("skill_invoked.py", {"session_id": sid, "tool_name": "Skill",
+                                      "tool_input": {"skill": "mac-doctor"}},
+                 env={"SKILL_ROUTER_NO_LEARN": "1", "SKILL_ROUTER_NO_LOG": "1"})
+        run_hook("skill_invoked.py", {"session_id": sid, "agent_id": "sub-1", "tool_name": "Skill",
+                                      "tool_input": {"skill": "theaibill"}},
+                 env={"SKILL_ROUTER_NO_LEARN": "1", "SKILL_ROUTER_NO_LOG": "1"})
+        self.assertEqual(router.loaded_this_session({"session_id": sid}), frozenset({"mac-doctor"}))
+        self.assertEqual(router.loaded_this_session({}), frozenset())
+
+    def test_a_dead_agent_degrades_to_in_session_not_to_silence(self) -> None:
+        saved = router.valid_agent
+        try:
+            router.valid_agent = lambda name: name != "product-designer" and saved(name)
+            self.answer(domain=("design-review", 0.92), process=(None, 0.9))
+            _, chain, _, text = router.route("do a comeplte desing revewi of the setings page")
+            self.assertEqual([(s.skill, s.agent) for s in chain], [("design-review", "general-purpose")])
+            self.assertNotIn("product-designer", text)
+        finally:
+            router.valid_agent = saved
+
+    def test_router_never_routes_to_itself(self) -> None:
+        self.answer(domain=("skill-router", 0.99), process=(None, 0.9))
+        chain = router.route("pls chek why the anouncemnt hook is so noisey")[1]
+        self.assertNotIn("skill-router", [s.skill for s in chain])
+
+    def test_card_is_capped(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), process=(None, 0.9))
+        saved = router.specialist_for
+        try:
+            router.specialist_for = lambda prompt, exclude: ("some-specialist", "x" * 3000)
+            self.answer(domain=(None, 0.9), process=("superpowers:brainstorming", 0.9), path="BUILD")
+            text = router.route("lets think abuot how the onbording shuld work")[3]
+            self.assertLessEqual(len(text), router.CARD_MAX_CHARS)
+            self.assertIn("▶ superpowers:brainstorming", text)
+        finally:
+            router.specialist_for = saved
+
+    def test_jev_question_never_silences_a_confident_route(self) -> None:
+        self.answer(domain=("mac-doctor", 0.9), process=(None, 0.9), path="QUESTION", pathc=0.97)
+        _, chain, _, _ = router.route("my mcbook keps restaring evry nite pls chek")
+        self.assertEqual([s.skill for s in chain], ["mac-doctor"])
+
+    def test_no_answer_falls_back_to_the_lexical_path(self) -> None:
+        prompt = "my mac keeps restarting randomly with kernel panics, diagnose it"
+        router._jev_decide = lambda p: None
+        fallback = router.route(prompt)
+        router._jev_decide = self._decide                  # real one: inactive outside hook mode
+        self.assertEqual(router.route(prompt)[:2], fallback[:2])
+        self.assertNotEqual(router.LAST_CARD.decided_by, "jev")
+
+    def test_a_jev_timeout_does_not_also_pay_for_the_small_model(self) -> None:
+        saved_flag, saved_llm = router.JEV_TIMED_OUT, os.environ.get("SKILL_ROUTER_LLM")
+        os.environ["SKILL_ROUTER_LLM"] = "1"
+        try:
+            res = router._index_classify("review the design of the settings page and fix spacing")
+            router.JEV_TIMED_OUT = True
+            self.assertIsNone(router._llm_decide("review the design of the settings page", res))
+        finally:
+            router.JEV_TIMED_OUT = saved_flag
+            os.environ["SKILL_ROUTER_LLM"] = saved_llm if saved_llm is not None else "0"
+
+    def test_offline_outside_hook_mode(self) -> None:
+        saved = {k: os.environ.pop(k, None) for k in ("SKILL_ROUTER_HOOK_MODE", "SKILL_ROUTER_JEV")}
+        llm = os.environ.pop("SKILL_ROUTER_LLM", None)
+        try:
+            self.assertFalse(router._jev_active())
+            os.environ["SKILL_ROUTER_HOOK_MODE"] = "1"
+            self.assertTrue(router._jev_active())
+            os.environ["SKILL_ROUTER_JEV"] = "0"
+            self.assertFalse(router._jev_active())
+            os.environ["SKILL_ROUTER_JEV"] = "1"
+            os.environ["SKILL_ROUTER_LLM"] = "0"
+            self.assertFalse(router._jev_active())
+        finally:
+            for k, v in {**saved, "SKILL_ROUTER_LLM": llm}.items():
+                os.environ.pop(k, None)
+                if v is not None:
+                    os.environ[k] = v
+
+
+class TestPreviousAssistantTail(unittest.TestCase):
+    def test_reads_last_main_thread_assistant_text(self) -> None:
+        t = _STATE / "transcript.jsonl"
+        rows = [
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "old turn"}]}},
+            {"type": "user", "message": {"content": "do the thing"}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Done. Shall I run the design review next?"},
+                {"type": "tool_use", "name": "Bash", "input": {}}]}},
+            {"type": "assistant", "isSidechain": True,
+             "message": {"content": [{"type": "text", "text": "sub-agent chatter"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {}}]}},
+        ]
+        t.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n")
+        got = router.previous_assistant_tail({"transcript_path": str(t)}, chars=19)
+        self.assertEqual(got, "design review next?")
+        self.assertEqual(router.previous_assistant_tail({}), "")
+        self.assertEqual(router.previous_assistant_tail({"transcript_path": "/nope/x.jsonl"}), "")
+
+
 class TestInstallerWiring(unittest.TestCase):
     def test_task_hook_and_index_are_installed(self) -> None:
         import install_hooks  # type: ignore[import-not-found]

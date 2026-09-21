@@ -1,5 +1,35 @@
 # Changelog
 
+## v4.1 — 2026-09-21
+
+- **Jev chooses over the whole index** (`jev_choose.py`): one TypeSafe System One call, two Choice
+  questions (domain, process) + path, no lexical pre-filter. On 63 real prompt→skill pairs:
+  39/63 right (lexical → Gemini top-8 was 10/66), and routes at ≥ 0.8 were right 32 of 34.
+  Median 416 ms, max 771 ms, ~12.3k input tokens (~$0.0005) per uncached prompt.
+- **Confidence-gated card**: ≥ 0.8 route, below that silent. The 0.5–0.8 `Possible fit:` line is
+  built but off by default (`SKILL_ROUTER_JEV_SUGGEST=1`): right 6 of 18, and it would print on
+  35 % of turns that needed no skill. Option keys (`d0…`, `p0…`) map back to index names; unknown
+  keys are dropped.
+- **Token discipline**, each measured on 150 real turns that needed no skill:
+  when Jev answers the regex table no longer adds a process leg (cards 34 % → 15 % of such turns);
+  a skill already loaded this session is never carded again (`skill_invoked.py` records loads per
+  session); the router never routes to its own skill (it was the #1 load, 46 of 215); advisory
+  lines are dropped when a card would pass 1,000 chars; harness "(Re-invocation of /…" turns are skipped.
+- **Previous assistant turn in state** for prompts ≤ 15 words only — measured: helps short
+  follow-ups ("yes" → the skill just offered), hurts long prompts.
+- Slash commands, harness builtins and agents are never offered to Jev (measured, see docs).
+- Index larger than one Choice (255) is split across questions, not truncated.
+- **Disabled plugins are no longer indexed or treated as installed** (`build_catalog.disabled_plugins`,
+  used by the catalog and by the router's own skill/agent validity check): 46 `vercel:*` entries
+  could be chosen but never loaded. A route naming an archived or disabled agent keeps its skill
+  and runs in-session instead of failing doctor (`integration-specialist`, archived 09-14).
+- Falls back to lexical + Gemini on any failure; a wall-clock timeout (1.2 s — Jev latency is
+  bimodal, ~0.3 s or ~3 s) falls back to lexical only, never to a second model call. Hook turns only, so
+  tests, calibration and doctor stay offline. `SKILL_ROUTER_JEV=0` turns it off, `=1` opts a probe in.
+- `refresh_env.py` caches `TYPESAFE_API_KEY`; a missing secret no longer costs the other keys.
+  Doctor reports the Jev stage.
+- Eval scripts and results: `docs/jev-eval-2026-09-21/`.
+
 ## v4.0 — 2026-09-07
 
 - **Enriched skill index** (`build_index.py`, `index_match.py`): every invokable skill indexed by
