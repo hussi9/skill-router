@@ -160,6 +160,8 @@ def rearm(skill: str) -> None:
 
 
 def main() -> int:
+    if os.environ.get("SKILL_ROUTER_OFF") == "1":   # a Kimi offload child, or the user
+        return 0
     payload = read_payload()
     skill = invoked_skill(payload)
     if not skill:

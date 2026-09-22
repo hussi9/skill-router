@@ -682,6 +682,9 @@ def write_session_route(chain: list[Step], path: str, meta: Optional[dict]) -> N
         "gates": list(card.gates),
         "memory": list(card.memory),
         "decided_by": card.decided_by,
+        "work": card.work or None,
+        "work_confidence": round(card.work_confidence, 2),
+        "model": card.model,
     }
     # Resolved at call time so a test module can point it somewhere hermetic
     # after this module was imported.
@@ -1383,6 +1386,7 @@ def log_chain(path: str, chain: list[Step], domains: list[str],
             "saved": False, "via": "router-hook",
             "tier": LAST_CARD.tier, "decided_by": LAST_CARD.decided_by,
             "confidence": LAST_CARD.confidence,
+            "work": LAST_CARD.work or None, "work_model": LAST_CARD.model,
             "session_id": meta.get("session_id"),
             "prompt_id": meta.get("prompt_id"),
         }) + "\n")
@@ -1511,6 +1515,9 @@ class RouteCard:
     confidence: str = ""
     path: str = ""                      # the path this card was built for
     primary: str = ""                   # chain[0].skill this card belongs to
+    work: str = ""                      # light | standard | heavy | "" (Jev's work tier)
+    work_confidence: float = 0.0
+    model: str = "inherit"              # haiku | sonnet | inherit — what the tier earns
 
 
 LAST_CARD = RouteCard()
@@ -1547,6 +1554,9 @@ def _finish(path: str, chain: list[Step], domains: list[str],
     announcement = base = render(path, chain, domains, note=note)
     if not announcement:
         return path, chain, domains, ""
+    extra = work_lines(LAST_CARD, path)
+    if extra:
+        announcement = base = base + "\n" + "\n".join(extra)
     # The v4 index puts the domain skill *in* the chain, so the specialist
     # advisory only fires when the chain is process-only.
     if LAST_CARD.primary_kind in ("", "process"):
@@ -1779,14 +1789,116 @@ def _route_from_jev(prompt: str, jev, res, domains: list[str],
         suggestions = []
     chain = _drop_soft([s for s in chain if valid_skill(s.skill)])
     if not chain:
+        # No skill fits, but the turn may still be light/standard work on a
+        # strained quota — the one case a line is worth printing without a card.
+        work_path = path if path != "SKIP" else (
+            jev.path if jev.path in ("BROKEN", "BUILD", "OPERATE") and jev.path_confidence >= 0.5
+            else "SKIP")
+        nudge = quota_only_line(jev, work_path)
+        if nudge:
+            suggestions.append(nudge)
         return "SKIP", [], domains, "\n".join(suggestions)
     card = RouteCard(tier=_tier_for(path, gates), gates=gates, memory=memory,
                      decided_by="jev", primary_kind=primary_kind,
-                     confidence=f"jev:{confidence:.2f}" if confidence else "table")
+                     confidence=f"jev:{confidence:.2f}" if confidence else "table",
+                     work=jev.work.name or "", work_confidence=jev.work.confidence,
+                     model=jev.model)
     path, chain, domains, announcement = _finish(path, chain, domains, prompt, card=card)
     if announcement and suggestions:
         announcement += "\n" + "\n".join(suggestions)
     return path, chain, domains, announcement
+
+
+# ---- v4.2: work tier → model, quota → Kimi ------------------------------------
+
+WORK_LINE_MAX = 220
+
+
+def _quota():
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import quota  # type: ignore[import-not-found]
+        return quota
+    except ImportError:
+        return None
+
+
+SESSION_ID = ""                      # set by main() in hook mode
+QUOTA_HINT_EVERY_S = 30 * 60         # one Kimi nudge per band per half hour per session
+
+
+def _quota_hint_due(band: str) -> bool:
+    """Every injected line is re-read on every later turn, so the Kimi nudge
+    prints once per band per half hour per session, not on every prompt.
+    Outside hook mode (tests, probes) it is always due and nothing is written."""
+    if os.environ.get("SKILL_ROUTER_HOOK_MODE") != "1":
+        return True
+    sid = re.sub(r"[^A-Za-z0-9_-]", "_", SESSION_ID or "nosession")[:80]
+    session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR") or SESSION_DIR)
+    mark = session_dir / f"{sid}.quota-{band}"
+    try:
+        if mark.is_file() and time.time() - mark.stat().st_mtime < QUOTA_HINT_EVERY_S:
+            return False
+        session_dir.mkdir(parents=True, exist_ok=True)
+        mark.write_text(str(time.time()))
+    except OSError:
+        return True
+    return True
+
+
+def quota_only_line(jev, path: str) -> str:
+    """The Kimi nudge on a turn that got no card: light/standard work, no
+    skill fit, quota strained. Empty otherwise."""
+    if jev is None or path in ("SKIP", "QUESTION"):
+        return ""
+    card = RouteCard(work=jev.work.name or "", work_confidence=jev.work.confidence, model=jev.model)
+    lines = [ln for ln in work_lines(card, path) if "Quota:" in ln or "Kimi mode" in ln]
+    return lines[0] if lines else ""
+
+
+def work_lines(card: RouteCard, path: str) -> list[str]:
+    """The model-choice lines for a card. Empty on most turns.
+
+    Two things can print, both one line and both only when they change what
+    the model should do next:
+
+      Work: light (jev 0.91) → sub-agents dispatch on haiku
+          only when the tier moves the model off inherit. The Task hook is
+          what actually sets the model; this line tells the parent why a
+          dispatch came back on Haiku and nudges it to delegate the bulk part.
+
+      Quota: 5h 87% · 7d 62% → offload to Kimi: bash …/kimi_offload.sh "<task>"
+          only when the status line has reported a window over the threshold
+          (or SKILL_ROUTER_KIMI=always) and the work is light/standard. A
+          heavy task on a strained quota still gets the session model: that
+          is the one place a downgrade shows.
+
+    Questions and silent turns print nothing: the tier of a chat reply is
+    not information anyone acts on.
+    """
+    out: list[str] = []
+    if path in ("SKIP", "QUESTION") or not card.work:
+        return out
+    q = _quota()
+    if card.model != "inherit":                       # only ever true at >= 0.8
+        out.append(f"[skill-router] Work: {card.work} (jev {card.work_confidence:.2f}) "
+                   f"→ sub-agents dispatch on {card.model}")
+    # Measured on 150 real user prompts (2026-09-22): light/standard at >= 0.8
+    # is 2 % of turns, at >= 0.5 it is 20 % — and the 0.5-0.8 band is mostly
+    # "commit this", "push a preview", "untrack .archive". Small, but real,
+    # and exactly what Kimi should absorb once the quota is nearly gone. So
+    # the nudge bar drops to 0.5 only when a window is past the critical mark.
+    band = q.band() if q is not None else ""
+    nudge_at = 0.5 if band == "critical" else 0.8
+    if (q is not None and card.work_confidence >= nudge_at and q.offload_wanted(card.work)
+            and _quota_hint_due(band or "always")):
+        used = q.summary()
+        tier_flag = f" --tier {card.work}" if card.work != "standard" else ""
+        script = Path(__file__).resolve().parent / "kimi_offload.sh"
+        why = "Kimi mode: always" if q.kimi_mode() == "always" else f"Quota: {used or 'strained'}"
+        out.append(f"[skill-router] {why} → this is {card.work} work; offload it: "
+                   f"bash {script}{tier_flag} \"<the task>\"")
+    return [ln for ln in out if len(ln) <= WORK_LINE_MAX]
 
 
 def _agent_for_kind(kind: str) -> str:
@@ -2303,6 +2415,8 @@ def log_prompt_event(prompt: str, meta: dict, path: str, chain: list[Step],
 
 
 def main() -> int:
+    if os.environ.get("SKILL_ROUTER_OFF") == "1":   # a Kimi offload child, or the user
+        return 0
     prompt, hook_meta = _read_input()
     # Hook-mode gate: only the UserPromptSubmit hook should mutate the live
     # iron-rule state. CLI invocations (testing, scripts, dashboards) must not
@@ -2328,7 +2442,8 @@ def main() -> int:
             print("[skill-router] (stand-down — explicit slash-command invocation)",
                   file=sys.stderr)
         return 0
-    global PREV_ASSISTANT, LOADED
+    global PREV_ASSISTANT, LOADED, SESSION_ID
+    SESSION_ID = str(hook_meta.get("session_id") or "") if hook_mode else ""
     PREV_ASSISTANT = previous_assistant_tail(hook_meta) if hook_mode else ""
     LOADED = loaded_this_session(hook_meta) if hook_mode else frozenset()
     try:
@@ -2346,7 +2461,10 @@ def main() -> int:
         # then read those as announcements you ignored, drove the follow rate
         # for systematic-debugging to zero, and the embedder rescue started
         # refusing it. The router was being taught by its own test suite.
-        if hook_mode:
+        # A card-less line (quota nudge, suggestion) announces no chain: nothing
+        # to enforce, and a chain-start with no steps would teach the learner
+        # about an announcement nobody could follow.
+        if hook_mode and chain:
             log_chain(path, chain, domains, meta=hook_meta)
             write_pending(chain, path, domains, meta=hook_meta)
     else:

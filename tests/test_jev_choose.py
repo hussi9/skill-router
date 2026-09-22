@@ -85,7 +85,7 @@ class JevCase(unittest.TestCase):
 class TestQuestions(JevCase):
     def test_split_on_kind_and_agents_excluded(self) -> None:
         questions, keymap = jev_choose.build_questions(ENTRIES)
-        self.assertEqual(sorted(questions), ["domain_0", "path", "process"])
+        self.assertEqual(sorted(questions), ["domain_0", "path", "process", "tier"])
         self.assertEqual(sorted(keymap["domain_0"].values()), ["design-review", "mac-doctor"])
         self.assertEqual(sorted(keymap["process"].values()),
                          ["superpowers:brainstorming", "superpowers:systematic-debugging"])
@@ -248,6 +248,73 @@ class TestChoose(JevCase):
         got = jev_choose.choose("ambiguous across the two halves", entries=many)
         self.assertEqual(got.domain.name, keymap["domain_1"][k1])
         self.assertEqual(got.domain.tier, "suggest")
+
+
+def with_tier(reply: dict, choice: str, conf: float) -> dict:
+    reply["answers"]["tier"] = {"type": "choice", "choice": choice, "confidence": conf,
+                                "probabilities": {choice: conf}}
+    return reply
+
+
+class TestWorkTier(JevCase):
+    """tier → model. Conservative: only a >= 0.8 light/standard leaves inherit."""
+
+    def test_tier_question_is_asked_with_the_others(self) -> None:
+        questions, _ = jev_choose.build_questions(ENTRIES)
+        self.assertEqual(sorted(questions["tier"]["criteria"]), ["heavy", "light", "standard"])
+
+    def test_confident_light_is_haiku(self) -> None:
+        self.transport(with_tier(answer("none", 0.9, "none", 0.9), "light", 0.93))
+        got = jev_choose.choose("list every file that imports requests", entries=ENTRIES)
+        self.assertEqual((got.work.name, got.work.tier, got.model), ("light", "route", "haiku"))
+
+    def test_confident_standard_is_sonnet(self) -> None:
+        self.transport(with_tier(answer("none", 0.9, "none", 0.9), "standard", 0.84))
+        got = jev_choose.choose("add a unit test for parse_date", entries=ENTRIES)
+        self.assertEqual(got.model, "sonnet")
+
+    def test_heavy_and_unsure_both_inherit(self) -> None:
+        self.transport(with_tier(answer("none", 0.9, "none", 0.9), "heavy", 0.95))
+        self.assertEqual(jev_choose.choose("redesign the auth flow", entries=ENTRIES).model, "inherit")
+        self.calls.clear()
+        self.transport(with_tier(answer("none", 0.9, "none", 0.9), "light", 0.71))
+        got = jev_choose.choose("tidy this up a bit", entries=ENTRIES)
+        self.assertEqual((got.work.tier, got.model), ("suggest", "inherit"))
+
+    def test_missing_or_junk_tier_answer_inherits(self) -> None:
+        self.transport(answer("none", 0.9, "none", 0.9))                   # no tier at all
+        self.assertEqual(jev_choose.choose("whatever", entries=ENTRIES).model, "inherit")
+        self.calls.clear()
+        self.transport(with_tier(answer("none", 0.9, "none", 0.9), "gigantic", 0.99))
+        self.assertEqual(jev_choose.choose("whatever else", entries=ENTRIES).model, "inherit")
+
+    def test_old_cache_entries_without_work_still_load(self) -> None:
+        self.transport(with_tier(answer("none", 0.9, "none", 0.9), "light", 0.9))
+        jev_choose.choose("grep for TODO", entries=ENTRIES)
+        for p in jev_choose.CACHE.glob("*.json"):
+            d = json.loads(p.read_text())
+            d.pop("work", None)
+            p.write_text(json.dumps(d))
+        got = jev_choose.choose("grep for TODO", entries=ENTRIES)
+        self.assertTrue(got.cached)
+        self.assertEqual(got.model, "inherit")
+
+    def test_tier_only_is_one_small_cached_call(self) -> None:
+        self.transport(with_tier({"answers": {}}, "light", 0.88))
+        pick = jev_choose.tier_only("find all call sites of fetchUser")
+        self.assertEqual((pick.name, pick.tier), ("light", "route"))
+        self.assertEqual(jev_choose.model_for(pick), "haiku")
+        self.assertEqual(sorted(self.calls[0]["questions"]), ["tier"])
+        self.assertEqual(self.calls[0]["state"], {"request": "find all call sites of fetchUser"})
+        again = jev_choose.tier_only("find all call sites of fetchUser")
+        self.assertEqual(len(self.calls), 1)                                # cache hit
+        self.assertEqual(again.name, "light")
+
+    def test_tier_only_failures_are_none_and_uncached(self) -> None:
+        self.transport(lambda body: None)
+        self.assertIsNone(jev_choose.tier_only("anything"))
+        self.assertEqual(list(jev_choose.CACHE.glob("*.json")), [])
+        self.assertEqual(jev_choose.model_for(None), "inherit")
 
 
 if __name__ == "__main__":

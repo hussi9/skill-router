@@ -218,6 +218,14 @@ class TestSubagentHandoff(unittest.TestCase):
                                          "tool_input": {"prompt": "x\n[skill-router] already"}})
         self.assertEqual(out, "")
 
+    def test_task_hook_is_offline_outside_hook_mode(self) -> None:
+        # No SKILL_ROUTER_HOOK_MODE, no SKILL_ROUTER_JEV=1: never a model, never a call.
+        out = run_hook("task_brief.py", {"session_id": "sess-none",
+                                         "tool_input": {"prompt": "list every file importing requests"}},
+                       env={"SKILL_ROUTER_HOOK_MODE": "", "SKILL_ROUTER_JEV": ""})
+        # A brief may still be appended (latest.json from another test); a model never is.
+        self.assertNotIn('"model"', out)
+
     def test_subagent_brief_carries_parent_route(self) -> None:
         out = run_hook("subagent_brief.py", {"agent_type": "general-purpose", "session_id": "sess-x"},
                        env={"SKILL_ROUTER_NO_LOG": "1"})
@@ -386,6 +394,224 @@ class TestJevRoute(unittest.TestCase):
                 os.environ.pop(k, None)
                 if v is not None:
                     os.environ[k] = v
+
+
+class TestWorkTierAndQuota(unittest.TestCase):
+    """v4.2: the work tier on the card, the Kimi nudge, the dispatch model."""
+
+    def setUp(self) -> None:
+        self._decide = router._jev_decide
+        import jev_choose  # type: ignore[import-not-found]
+        import quota  # type: ignore[import-not-found]
+        self.jev, self.quota = jev_choose, quota
+        self.qfile = _STATE / "quota.json"
+        os.environ["SKILL_ROUTER_QUOTA_FILE"] = str(self.qfile)
+        os.environ.pop("SKILL_ROUTER_KIMI", None)
+        os.environ.pop("SKILL_ROUTER_HOOK_MODE", None)
+        self.write_quota(five=20, seven=30)
+
+    def tearDown(self) -> None:
+        router._jev_decide = self._decide
+        os.environ.pop("SKILL_ROUTER_QUOTA_FILE", None)
+        os.environ.pop("SKILL_ROUTER_KIMI", None)
+
+    def write_quota(self, five: float, seven: float, model: str = "claude-fable-5-1",
+                    age_s: float = 0.0) -> None:
+        import time
+        self.qfile.write_text(json.dumps({"ts": time.time() - age_s, "model_id": model,
+                                          "five_hour": five, "seven_day": seven}))
+
+    def answer(self, domain=(None, 0.0), work=("heavy", 0.9), path="OPERATE", pathc=0.9):
+        j = self.jev
+        choice = j.Choice(j.Pick(domain[0], domain[1], j.tier(domain[1])),
+                          j.Pick(None, 0.9, "route"), path, pathc, 400, 15000,
+                          work=j.Pick(work[0], work[1], j.tier(work[1])))
+        router._jev_decide = lambda prompt: choice
+
+    def test_light_work_prints_the_dispatch_model_and_records_it(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), work=("light", 0.91))
+        _, chain, _, text = router.route("list every launch agent on this mac")
+        self.assertIn("Work: light (jev 0.91) → sub-agents dispatch on haiku", text)
+        self.assertEqual((router.LAST_CARD.work, router.LAST_CARD.model), ("light", "haiku"))
+        router.write_session_route(chain, "OPERATE", {"session_id": "sess-w"})
+        rec = json.loads((_STATE / "session" / "sess-w.json").read_text())
+        self.assertEqual((rec["work"], rec["model"], rec["work_confidence"]), ("light", "haiku", 0.91))
+
+    def test_heavy_or_unsure_work_prints_nothing_extra(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), work=("heavy", 0.95))
+        text = router.route("my mac keeps restarting at night, find the root cause")[3]
+        self.assertNotIn("Work:", text)
+        self.answer(domain=("mac-doctor", 0.93), work=("light", 0.7))
+        text = router.route("clean up the launch agents")[3]
+        self.assertNotIn("Work:", text)
+        self.assertEqual(router.LAST_CARD.model, "inherit")
+
+    def test_quota_high_points_light_work_at_kimi(self) -> None:
+        self.write_quota(five=87, seven=40)
+        self.answer(domain=("mac-doctor", 0.93), work=("light", 0.9))
+        text = router.route("list every launch agent on this mac")[3]
+        self.assertIn("Quota: 5h 87% · 7d 40%", text)
+        self.assertIn("kimi_offload.sh --tier light", text)
+
+    def test_quota_high_leaves_heavy_work_on_the_session_model(self) -> None:
+        self.write_quota(five=97, seven=90)
+        self.answer(domain=("mac-doctor", 0.93), work=("heavy", 0.9))
+        text = router.route("find the root cause of the nightly restarts")[3]
+        self.assertNotIn("Quota:", text)
+        self.assertNotIn("kimi", text.lower())
+
+    def test_critical_quota_nudges_at_half_confidence_high_does_not(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), work=("light", 0.6))
+        self.write_quota(five=88, seven=40)                                 # high: bar stays 0.8
+        self.assertNotIn("kimi", router.route("commit the launch agent cleanup")[3].lower())
+        self.write_quota(five=96, seven=40)                                 # critical: bar drops to 0.5
+        text = router.route("commit the launch agent cleanup")[3]
+        self.assertIn("kimi_offload.sh --tier light", text)
+        self.assertNotIn("Work:", text)                                     # 0.6 never moves a dispatch model
+        self.answer(domain=("mac-doctor", 0.93), work=("heavy", 0.55))
+        self.assertNotIn("kimi", router.route("rethink the launch agent setup")[3].lower())
+
+    def test_quota_low_never_mentions_kimi(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), work=("light", 0.9))
+        text = router.route("list every launch agent on this mac")[3]
+        self.assertNotIn("kimi", text.lower())
+
+    def test_stale_quota_file_reads_as_unknown(self) -> None:
+        self.write_quota(five=99, seven=99, age_s=3600)
+        self.assertEqual(self.quota.band(), "")
+        self.answer(domain=("mac-doctor", 0.93), work=("light", 0.9))
+        self.assertNotIn("kimi", router.route("list every launch agent")[3].lower())
+
+    def test_kimi_always_mode_and_off_mode(self) -> None:
+        self.answer(domain=("mac-doctor", 0.93), work=("standard", 0.85))
+        os.environ["SKILL_ROUTER_KIMI"] = "always"
+        text = router.route("add a launchd plist for the backup script")[3]
+        self.assertIn("Kimi mode: always", text)
+        self.assertNotIn("--tier", text)                       # standard is the script default
+        os.environ["SKILL_ROUTER_KIMI"] = "off"
+        self.write_quota(five=99, seven=99)
+        text = router.route("add a launchd plist for the backup script")[3]
+        self.assertNotIn("kimi", text.lower())
+
+    def test_no_card_still_gets_the_nudge_on_strained_quota(self) -> None:
+        self.write_quota(five=91, seven=50)
+        self.answer(domain=(None, 0.9), work=("light", 0.88), path="OPERATE", pathc=0.8)
+        path, chain, _, text = router.route("rename every occurrence of fetchUser to loadUser")
+        self.assertEqual((path, chain), ("SKIP", []))
+        self.assertIn("kimi_offload.sh", text)
+        self.assertNotIn("▶", text)
+
+    def test_no_card_and_question_stays_silent(self) -> None:
+        self.write_quota(five=91, seven=50)
+        self.answer(domain=(None, 0.9), work=("light", 0.88), path="QUESTION", pathc=0.9)
+        self.assertEqual(router.route("what does launchd do")[3], "")
+
+    def test_nudge_is_rate_limited_per_session_in_hook_mode(self) -> None:
+        self.write_quota(five=91, seven=50)
+        self.answer(domain=("mac-doctor", 0.93), work=("light", 0.9))
+        os.environ["SKILL_ROUTER_HOOK_MODE"] = "1"
+        self.addCleanup(os.environ.pop, "SKILL_ROUTER_HOOK_MODE", None)
+        router.SESSION_ID = "sess-rl"
+        self.addCleanup(setattr, router, "SESSION_ID", "")
+        first = router.route("list every launch agent on this mac")[3]
+        second = router.route("list every launch agent on this mac")[3]
+        self.assertIn("kimi_offload.sh", first)
+        self.assertNotIn("kimi_offload.sh", second)
+        self.assertIn("Work: light", second)                  # the model line still prints
+
+    def test_quota_module_reads_model_class_and_bands(self) -> None:
+        q = self.quota
+        self.assertEqual(q.model_class("claude-fable-5-1"), "fable")
+        self.assertEqual(q.model_class("claude-haiku-4-5-20251001"), "haiku")
+        self.assertEqual(q.model_class("kimi-k3[1m]"), "")
+        self.write_quota(five=50, seven=96)
+        self.assertEqual(q.band(), "critical")
+        self.write_quota(five=81, seven=10)
+        self.assertEqual(q.band(), "high")
+        self.qfile.write_text("not json")
+        self.assertEqual((q.band(), q.session_model(), q.summary()), ("", "", ""))
+
+
+class TestDispatchModel(unittest.TestCase):
+    """task_brief.py sets the sub-agent model from Jev's tier — in-process, no network."""
+
+    def setUp(self) -> None:
+        import task_brief  # type: ignore[import-not-found]
+        import jev_choose  # type: ignore[import-not-found]
+        self.tb, self.jev = task_brief, jev_choose
+        self._tier_only = jev_choose.tier_only
+        self.tb.LOG = _STATE / "tb-log.jsonl"
+        for f in (_STATE / "session").glob("*.json"):      # no parent route unless a test writes one
+            f.unlink()
+        os.environ["SKILL_ROUTER_JEV"] = "1"
+        os.environ.pop("SKILL_ROUTER_SUBAGENT_MODEL", None)
+
+    def tearDown(self) -> None:
+        self.jev.tier_only = self._tier_only
+        os.environ.pop("SKILL_ROUTER_JEV", None)
+        os.environ.pop("SKILL_ROUTER_SUBAGENT_MODEL", None)
+
+    def fake(self, name, conf):
+        self.jev.tier_only = lambda prompt, timeout=None: self.jev.Pick(name, conf, self.jev.tier(conf))
+
+    def run_main(self, payload: dict) -> dict:
+        import io
+        saved_in, saved_out = sys.stdin, sys.stdout
+        sys.stdin, sys.stdout = io.StringIO(json.dumps(payload)), io.StringIO()
+        try:
+            self.assertEqual(self.tb.main(), 0)
+            out = sys.stdout.getvalue().strip()
+        finally:
+            sys.stdin, sys.stdout = saved_in, saved_out
+        return json.loads(out)["hookSpecificOutput"]["updatedInput"] if out else {}
+
+    def test_light_dispatch_goes_to_haiku(self) -> None:
+        self.fake("light", 0.92)
+        upd = self.run_main({"session_id": "s1", "tool_input": {
+            "prompt": "find every call site of fetchUser", "subagent_type": "Explore"}})
+        self.assertEqual(upd["model"], "haiku")
+        self.assertEqual(upd["prompt"], "find every call site of fetchUser")
+        rec = json.loads(self.tb.LOG.read_text().splitlines()[-1])
+        self.assertEqual((rec["type"], rec["model"], rec["work"], rec["agent"]),
+                         ("subagent-model", "haiku", "light", "Explore"))
+
+    def test_standard_dispatch_goes_to_sonnet(self) -> None:
+        self.fake("standard", 0.83)
+        upd = self.run_main({"session_id": "s1", "tool_input": {"prompt": "add a unit test for parse_date"}})
+        self.assertEqual(upd["model"], "sonnet")
+
+    def test_heavy_or_unsure_dispatch_is_untouched(self) -> None:
+        self.fake("heavy", 0.9)
+        self.assertEqual(self.run_main({"tool_input": {"prompt": "redesign the auth flow"}}), {})
+        self.fake("light", 0.74)
+        self.assertEqual(self.run_main({"tool_input": {"prompt": "tidy this up"}}), {})
+        rec = json.loads(self.tb.LOG.read_text().splitlines()[-1])
+        self.assertEqual((rec["model"], rec["work"]), ("inherit", "light"))
+
+    def test_explicit_model_and_escape_marker_are_respected(self) -> None:
+        self.fake("light", 0.99)
+        self.assertEqual(self.run_main({"tool_input": {"prompt": "grep for TODO", "model": "opus"}}), {})
+        self.assertEqual(self.run_main({"tool_input": {"prompt": "grep for TODO [no-router]"}}), {})
+
+    def test_kill_switch(self) -> None:
+        self.fake("light", 0.99)
+        os.environ["SKILL_ROUTER_SUBAGENT_MODEL"] = "0"
+        self.assertEqual(self.run_main({"tool_input": {"prompt": "grep for TODO"}}), {})
+
+    def test_jev_failure_leaves_the_dispatch_alone(self) -> None:
+        self.jev.tier_only = lambda prompt, timeout=None: None
+        self.assertEqual(self.run_main({"tool_input": {"prompt": "grep for TODO"}}), {})
+
+    def test_model_and_brief_compose(self) -> None:
+        sd = _STATE / "session"
+        sd.mkdir(parents=True, exist_ok=True)
+        (sd / "sess-m.json").write_text(json.dumps({
+            "session_id": "sess-m", "path": "OPERATE", "skills": ["theaibill"],
+            "primary": "theaibill", "tier": "soft", "gates": [], "memory": []}))
+        self.fake("light", 0.9)
+        upd = self.run_main({"session_id": "sess-m", "tool_input": {"prompt": "list the pricing tiers"}})
+        self.assertEqual(upd["model"], "haiku")
+        self.assertIn('Skill(skill="theaibill")', upd["prompt"])
 
 
 class TestPreviousAssistantTail(unittest.TestCase):

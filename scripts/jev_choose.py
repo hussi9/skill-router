@@ -22,6 +22,12 @@ questions over the same state:
     process    which working method fits (kind == "process"), plus "none".
     path       BROKEN | BUILD | OPERATE | QUESTION — used by the router only
                when its own regex triage is silent.
+    tier       light | standard | heavy — how much model the work needs. The
+               router prints it on the card and task_brief.py turns it into
+               the `model` of a sub-agent dispatch (light → haiku, standard →
+               sonnet, heavy → inherit). Same 0.8 gate: below it, inherit.
+               `tier_only()` asks just this question (no index) so the Task
+               hook can judge a sub-agent prompt in one small call.
 
 Options are sent as opaque keys (d0.., p0..) and mapped back here. A returned
 key this module did not send is dropped; a returned *name* is never trusted.
@@ -51,7 +57,7 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 HOME = Path.home()
-CACHE_ROOT = HOME / ".claude" / "skill_router_cache"
+CACHE_ROOT = Path(os.environ.get("SKILL_ROUTER_CACHE_DIR") or HOME / ".claude" / "skill_router_cache")
 ENV_FILE = CACHE_ROOT / "env.json"
 CACHE = CACHE_ROOT / "jev"
 
@@ -88,9 +94,35 @@ CONTEXT_MAX_WORDS = 15
 PATHS = ("BROKEN", "BUILD", "OPERATE", "QUESTION")
 NONE = "none"
 
+# Work tier → model. Conservative on purpose: a wrong downgrade costs quality
+# the user cannot see, a wrong "inherit" costs only money. So only a >= 0.8
+# light/standard answer moves off the session model, and "heavy" is the default.
+TIERS = ("light", "standard", "heavy")
+TIER_MODEL = {"light": "haiku", "standard": "sonnet", "heavy": "inherit"}
+TIER_CRITERIA = {
+    "light": ("Mechanical work with one right answer and no design judgment: find, list or "
+              "grep files; read and summarise; rename or move; reformat; apply one fixed rule "
+              "across many files; run a command and report its output; answer a lookup."),
+    "standard": ("Routine implementation against a clear spec where the approach is obvious: "
+                 "a small feature or endpoint, a known fix, a unit test, a doc section, a config "
+                 "or dependency change. Some judgment, little ambiguity."),
+    "heavy": ("Judgment-heavy or open-ended: architecture and design decisions, root-cause "
+              "debugging, security or auth, data migrations, ambiguous or multi-part "
+              "requirements, reviews, anything where a wrong call is expensive to undo."),
+}
+
+
+def model_for(pick: "Optional[Pick]") -> str:
+    """The model a tier Pick earns: haiku / sonnet at >= ROUTE_AT, else inherit."""
+    if pick is None or pick.tier != "route" or pick.name not in TIER_MODEL:
+        return "inherit"
+    return TIER_MODEL[pick.name]
+
 _TYPO_NOTE = "The request may contain spelling mistakes; judge the intended meaning."
 _CONTEXT_NOTE = (" When `previous_assistant_message` is present and the request is a short reply "
                  "to it (yes, continue, do it), judge what that reply asks to proceed with.")
+TIER_INSTRUCTIONS = ("How much reasoning the developer's `request` needs from the model that "
+                     "does the work. Pick `heavy` whenever unsure. " + _TYPO_NOTE)
 
 
 @dataclass(frozen=True)
@@ -110,6 +142,12 @@ class Choice:
     ms: int
     tokens: int
     cached: bool = False
+    work: Pick = Pick(None, 0.0, "silent")   # tier: name in TIERS, or None
+
+    @property
+    def model(self) -> str:
+        """haiku / sonnet / inherit — what the work tier earns."""
+        return model_for(self.work)
 
 
 def enabled() -> bool:
@@ -194,7 +232,20 @@ def build_questions(entries: Sequence[dict]) -> tuple[dict, dict[str, dict[str, 
             "BUILD": "Create something new: a feature, page, component, script, skill or document",
             "OPERATE": "Improve, review, audit, refactor, ship, deploy, research or configure existing work",
             "QUESTION": "The developer wants an answer, an explanation or a chat reply, not work done"}}
+    questions["tier"] = tier_question()
     return questions, keymap
+
+
+def tier_question() -> dict:
+    return {"type": "choice", "instructions": TIER_INSTRUCTIONS, "criteria": dict(TIER_CRITERIA)}
+
+
+def _tier_pick(answers: dict) -> Pick:
+    a = answers.get("tier")
+    if not isinstance(a, dict) or a.get("choice") not in TIERS:
+        return Pick(None, 0.0, "silent")
+    conf = _conf(a)
+    return Pick(a["choice"], conf, tier(conf))
 
 
 def _post(body: dict, key: str, timeout: float) -> Optional[dict]:
@@ -266,8 +317,9 @@ def _fingerprint(questions: dict) -> str:
 def _from_cache(path: Path) -> Optional[Choice]:
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
+        work = Pick(**d["work"]) if isinstance(d.get("work"), dict) else Pick(None, 0.0, "silent")
         return Choice(Pick(**d["domain"]), Pick(**d["process"]), d["path"],
-                      d["path_confidence"], d["ms"], d["tokens"], cached=True)
+                      d["path_confidence"], d["ms"], d["tokens"], cached=True, work=work)
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return None
 
@@ -328,13 +380,52 @@ def choose(prompt: str, context: str = "", entries: Optional[Sequence[dict]] = N
     if isinstance(pa, dict) and pa.get("choice") in PATHS:
         path, pconf = pa["choice"], _conf(pa)
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-    out = Choice(domain, process, path, pconf, ms, int(usage.get("input_tokens") or 0))
+    out = Choice(domain, process, path, pconf, ms, int(usage.get("input_tokens") or 0),
+                 work=_tier_pick(answers))
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
         cpath.write_text(json.dumps({k: v for k, v in asdict(out).items() if k != "cached"}))
     except OSError:
         pass
     return out
+
+
+def tier_only(prompt: str, timeout: Optional[float] = None) -> Optional[Pick]:
+    """Just the work tier for `prompt` — the sub-agent dispatch hook's call.
+
+    No index, ~200 input tokens, cached by prompt. None on any failure, and
+    the caller treats None exactly like "heavy": leave the model alone.
+    """
+    prompt = (prompt or "").strip()
+    if not prompt or not enabled():
+        return None
+    key = _key()
+    if not key:
+        return None
+    questions = {"tier": tier_question()}
+    state = {"request": prompt[:PROMPT_CHARS]}
+    h = hashlib.sha1(json.dumps([MODEL, "tier", state, _fingerprint(questions)],
+                                sort_keys=True).encode()).hexdigest()
+    cpath = CACHE / f"{h}.json"
+    try:
+        d = json.loads(cpath.read_text(encoding="utf-8"))
+        if isinstance(d.get("work"), dict):
+            return Pick(**d["work"])
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    secs = TIMEOUT_S if timeout is None else timeout
+    data = _deadline(lambda: _post({"model": MODEL, "state": state, "questions": questions},
+                                   key, secs), secs)
+    answers = data.get("answers") if isinstance(data, dict) else None
+    if not isinstance(answers, dict):
+        return None
+    pick = _tier_pick(answers)
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        cpath.write_text(json.dumps({"work": asdict(pick)}))
+    except OSError:
+        pass
+    return pick
 
 
 def status() -> dict:

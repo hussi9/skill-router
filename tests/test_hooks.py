@@ -411,3 +411,53 @@ class TestAgentModels(unittest.TestCase):
         self.assertEqual(pinned, [],
             "a pinned agent downgrades every dispatch on a stronger session; "
             "run scripts/fix_agent_models.py")
+
+
+class TestKimiOffload(unittest.TestCase):
+    """The offload script's contract, without a key or a network."""
+
+    SCRIPT = SCRIPTS / "kimi_offload.sh"
+
+    def test_exists_and_explains_itself(self) -> None:
+        self.assertTrue(os.access(self.SCRIPT, os.X_OK))
+        out = subprocess.run(["bash", str(self.SCRIPT), "--help"], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0)
+        self.assertIn("--tier light|standard|heavy", out.stdout)
+
+    def test_no_task_is_exit_2(self) -> None:
+        out = subprocess.run(["bash", str(self.SCRIPT)], input="", capture_output=True, text=True)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("no task", out.stderr)
+
+    def test_no_key_is_exit_2_and_never_runs_claude(self) -> None:
+        home = tempfile.mkdtemp(prefix="kimi-home-")
+        fake = Path(home) / "claude"
+        fake.write_text("#!/bin/sh\necho RAN >&2; exit 0\n")
+        fake.chmod(0o755)
+        env = {**os.environ, "HOME": home, "PATH": f"{home}:/usr/bin:/bin", "CLAUDE_BIN": str(fake)}
+        env.pop("MOONSHOT_API_KEY", None)
+        out = subprocess.run(["bash", str(self.SCRIPT), "--tier", "light", "list files"],
+                             capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 2, out.stderr)
+        self.assertIn("MOONSHOT_API_KEY", out.stderr)
+        self.assertNotIn("RAN", out.stderr)
+
+    def test_with_key_runs_claude_with_moonshot_env_and_logs(self) -> None:
+        home = tempfile.mkdtemp(prefix="kimi-home-")
+        fake = Path(home) / "claude"
+        fake.write_text('#!/bin/sh\necho "model=$ANTHROPIC_MODEL base=$ANTHROPIC_BASE_URL '
+                        'off=$SKILL_ROUTER_OFF args=$* stdin=$(cat)"\n')
+        fake.chmod(0o755)
+        env = {**os.environ, "HOME": home, "PATH": f"{home}:/usr/bin:/bin", "CLAUDE_BIN": str(fake),
+               "MOONSHOT_API_KEY": "sk-test"}
+        out = subprocess.run(["bash", str(self.SCRIPT), "--tier", "light", "list", "files"],
+                             capture_output=True, text=True, env=env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("model=kimi-k2.7-code base=https://api.moonshot.ai/anthropic off=1", out.stdout)
+        self.assertIn("--strict-mcp-config", out.stdout)
+        self.assertTrue(out.stdout.rstrip().endswith("stdin=list files"))
+        self.assertNotIn("args=-p list", out.stdout)                    # prompt travels on stdin
+        rec = json.loads((Path(home) / ".claude" / "skill_router_log.jsonl").read_text().splitlines()[-1])
+        self.assertEqual((rec["type"], rec["tier"], rec["rc"]), ("kimi-offload", "light", 0))
+        out = subprocess.run(["bash", str(self.SCRIPT), "do a thing"], capture_output=True, text=True, env=env)
+        self.assertIn("model=kimi-k3[1m]", out.stdout)

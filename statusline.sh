@@ -16,7 +16,7 @@ input=$(cat)
 
 # ── Parse session JSON via one Python call ────────────────────────────────────
 parse_py='
-import sys, json, os
+import sys, json, os, time
 try:
     d = json.loads(sys.argv[1])
 except Exception:
@@ -51,6 +51,29 @@ cost_tier = 0
 if cost_usd >= 2.0: cost_tier = 3
 elif cost_usd >= 1.0: cost_tier = 2
 elif cost_usd >= 0.5: cost_tier = 1
+
+# skill-router quota feed: hooks are not told the model or the rate-limit
+# windows, the status line is. Written on every redraw, read by
+# scripts/quota.py (card hints, sub-agent model choice). Best-effort.
+try:
+    rl = d.get("rate_limits") or {}
+    def _pct(k):
+        w = rl.get(k) or {}
+        v = w.get("used_percentage")
+        return float(v) if v is not None else None
+    rec = {"ts": time.time(),
+           "model_id": (m.get("id", "") if isinstance(m, dict) else str(m)) or "",
+           "model": model_raw,
+           "five_hour": _pct("five_hour"), "seven_day": _pct("seven_day"),
+           "session_id": d.get("session_id", "")}
+    qdir = os.path.join(home, ".claude", "skill_router_cache")
+    os.makedirs(qdir, exist_ok=True)
+    tmp = os.path.join(qdir, "quota.json.tmp")
+    with open(tmp, "w") as fh:
+        json.dump(rec, fh)
+    os.replace(tmp, os.path.join(qdir, "quota.json"))
+except Exception:
+    pass
 print(f"{model_raw}|{cwd}|{ctx_pct}|{cost_usd:.4f}|{duration_ms}|{added}|{removed}|{turns}|{ctx_used}|{ctx_total}|{cache_tok}|{cost_tier}")
 '
 

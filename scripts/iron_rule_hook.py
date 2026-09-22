@@ -39,6 +39,7 @@ crashing: an exception here would surface as a hook error on every single edit.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -159,6 +160,8 @@ def emit(payload: dict) -> None:
 
 
 def main() -> int:
+    if os.environ.get("SKILL_ROUTER_OFF") == "1":   # a Kimi offload child, or the user
+        return 0
     mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
     data = read_payload()
 

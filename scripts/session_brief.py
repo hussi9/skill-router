@@ -82,6 +82,8 @@ def brief(overlay: dict) -> list[str]:
 
 
 def main() -> int:
+    if os.environ.get("SKILL_ROUTER_OFF") == "1":   # a Kimi offload child, or the user
+        return 0
     if os.environ.get("SKILL_ROUTER_NO_LEARN") == "1":
         return 0
     lines = brief(load())

@@ -22,7 +22,7 @@ from pathlib import Path
 
 HOME = Path.home()
 OUT = HOME / ".claude" / "skill_router_cache" / "env.json"
-KEYS = ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "TYPESAFE_API_KEY")
+KEYS = ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "TYPESAFE_API_KEY", "MOONSHOT_API_KEY")
 PROJECT, CONFIG = "shared", "prd"
 
 

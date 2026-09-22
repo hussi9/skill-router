@@ -119,9 +119,11 @@ def managed_hooks() -> dict[str, list[dict]]:
                 MARKER: True,
                 "matcher": "Task|Agent",
                 "hooks": [hook(
-                    f"python3 {SCRIPTS}/task_brief.py", 5,
+                    f"SKILL_ROUTER_HOOK_MODE=1 python3 {SCRIPTS}/task_brief.py", 5,
                     "Append the parent's route card (skill, gates, memory) to "
-                    "every dispatched sub-agent prompt via updatedInput.",
+                    "every dispatched sub-agent prompt via updatedInput, and set "
+                    "the dispatch model from Jev's work tier (light → haiku, "
+                    "standard → sonnet). HOOK_MODE keeps Jev off in tests.",
                 )],
             },
         ],

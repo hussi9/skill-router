@@ -210,6 +210,8 @@ def log_event(agent_type: str, skills: list[str], provenance: str) -> None:
 
 
 def main() -> int:
+    if os.environ.get("SKILL_ROUTER_OFF") == "1":   # a Kimi offload child, or the user
+        return 0
     try:
         payload = json.loads(sys.stdin.read() or "{}")
     except (json.JSONDecodeError, ValueError):

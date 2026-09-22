@@ -1,5 +1,39 @@
 # Changelog
 
+## v4.2 — 2026-09-22
+
+- **Work tier → model** (`jev_choose.py` question `tier`): the same Jev call now says whether the
+  work is `light` / `standard` / `heavy`. Same 0.8 gate. `Choice.model` maps it to `haiku` /
+  `sonnet` / `inherit`; heavy and unsure both inherit — a wrong downgrade is invisible, a wrong
+  inherit only costs money.
+- **Sub-agent model is set at dispatch** (`task_brief.py`, PreToolUse `Task|Agent`,
+  `updatedInput.model`): `jev_choose.tier_only()` judges the sub-agent's own prompt in one small
+  cached call (~200 input tokens). Explicit `model=` in the call, `[no-router]` in the prompt, or
+  `SKILL_ROUTER_SUBAGENT_MODEL=0` leave it alone. Decisions logged as `subagent-model`. The
+  installed hook command now carries `SKILL_ROUTER_HOOK_MODE=1` so tests stay offline.
+- **Quota feed** (`statusline.sh` → `~/.claude/skill_router_cache/quota.json` → `quota.py`):
+  the status line is the only thing Claude Code tells the model id and the Pro/Max rate-limit
+  windows; it now writes them on every redraw. Stale after 15 min.
+- **Kimi offload** (`kimi_offload.sh`): a second `claude -p` on Moonshot (K2.7-code for light,
+  K3 1M otherwise), router hooks off inside it, no MCP servers, key from env → cached env.json →
+  Doppler `MOONSHOT_API_KEY`. The card points at it only when a window is ≥ 80 % used
+  (`SKILL_ROUTER_QUOTA_HIGH`) and the work is light/standard, at most once per band per half
+  hour per session; `SKILL_ROUTER_KIMI=always|off` overrides. Heavy work never leaves the
+  session model. Offloads logged as `kimi-offload`. In the critical band (≥ 95 %) the nudge bar
+  drops to 0.5 — measured: that band on user prompts is small commits/pushes, exactly what Kimi
+  should absorb when the subscription is nearly gone.
+- **Measured** (`docs/jev-eval-2026-09-22/`): on 93 real sub-agent dispatches Jev called 11 light
+  (≥ 0.8, every one a read-only inventory → haiku is right), 3 standard (plan tasks Claude had
+  itself put on sonnet/haiku), 43 heavy (reviews, audits); it agrees with the direction of all 38
+  explicit `model=` choices Claude made. On 150 real user prompts light/standard ≥ 0.8 is 2 % —
+  the card line is rare by design. Median 327 ms / 467 ms.
+- **Card lines**: `Work: <tier> (jev x.xx) → sub-agents dispatch on <model>` only when the tier
+  moves the model; the quota line also prints on a turn that earned no card, when the turn is
+  work (not QUESTION). Session route JSON and `chain-start` log carry `work` / `model`.
+- `SKILL_ROUTER_OFF=1` stands every hook down (router, iron rule, task brief, sub-agent brief,
+  session brief, skill invoked). `SKILL_ROUTER_CACHE_DIR` relocates the Jev cache for tests.
+- `refresh_env.py` also caches `MOONSHOT_API_KEY`.
+
 ## v4.1 — 2026-09-21
 
 - **Jev chooses over the whole index** (`jev_choose.py`): one TypeSafe System One call, two Choice

@@ -36,7 +36,7 @@
             "_skill_router": true,
             "_purpose": "Append the parent's route card (skill, gates, memory) to every dispatched sub-agent prompt via updatedInput.",
             "type": "command",
-            "command": "python3 /Users/airbook/.claude/skills/skill-router/scripts/task_brief.py",
+            "command": "SKILL_ROUTER_HOOK_MODE=1 python3 /Users/airbook/.claude/skills/skill-router/scripts/task_brief.py",
             "timeout": 5
           }
         ]
