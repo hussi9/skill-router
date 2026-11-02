@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.1 (public) — 2026-11-02
+
+- **skills.sh cache fails closed**: if the audits page cannot be read, the build writes nothing and the previous
+  screened cache stays (before, every skill became `unaudited` and a flagged one could slip back in).
+- `SKILL_ROUTER_REQUIRE_CLEAN=1` suggests only skills an audit partner explicitly passed.
+
 ## v2.0.0 (public) — 2026-11-01
 
 First public release of the line developed internally as v4.x. Version numbers here are the public ones.

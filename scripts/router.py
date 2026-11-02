@@ -2319,6 +2319,10 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
                 continue
             if entry.get("audit") == "flagged":
                 continue
+            # Strict mode: only skills an audit partner explicitly passed (SKILL_ROUTER_REQUIRE_CLEAN=1).
+            if (entry.get("source") == "online:skills.sh" and entry.get("audit") != "clean"
+                    and os.environ.get("SKILL_ROUTER_REQUIRE_CLEAN") == "1"):
+                continue
             if entry.get("source") == "online:skills.sh" and not entry.get("description"):
                 continue
             name = entry.get("name")

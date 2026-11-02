@@ -104,6 +104,15 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(ok["install_command"], "npx skills add o/r --skill ok")
         self.assertIn("&", ok["description"])           # entities decoded
 
+    def test_missing_audits_board_builds_nothing(self) -> None:
+        def no_audits(url: str) -> str:
+            if url.endswith("/audits"):
+                raise sh.FetchError("down")
+            return self.fetcher(url)
+        cat = sh.build(no_audits, now=1000.0)
+        self.assertEqual(cat["catalogs"]["skills.sh"], [])
+        self.assertTrue(any("audits" in e for e in cat["metadata"]["errors"]))
+
     def test_second_run_inside_ttl_makes_no_skill_page_requests(self) -> None:
         sh.build(self.fetcher, now=1000.0)
         self.calls.clear()
@@ -157,9 +166,17 @@ class TestRouterUsesTheCache(unittest.TestCase):
             f, tmp / "none.json", tmp / "none2.json"
         try:
             got = router.suggest_online_skill("tune postgres query performance indexes please")
+            router._online_skill_index.cache_clear()
+            got = router.suggest_online_skill("tune postgres query performance indexes please")
             self.assertEqual(got["name"], "postgres-perf")
             self.assertIn("9,000 installs", router.render_online_suggestion(got))
+            os.environ["SKILL_ROUTER_REQUIRE_CLEAN"] = "1"
+            router._online_skill_index.cache_clear()
+            strict = router.suggest_online_skill("tune postgres query performance indexes please")
+            self.assertEqual(strict["name"], "pg-tuning", "strict mode takes only audit-clean entries")
         finally:
+            os.environ.pop("SKILL_ROUTER_REQUIRE_CLEAN", None)
+            router._online_skill_index.cache_clear()
             router.SKILLS_SH_FILE, router.ONLINE_CATALOG_FILE, router.LOCAL_CATALOG_FILE = saved
 
 

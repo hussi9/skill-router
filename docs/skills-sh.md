@@ -40,6 +40,9 @@ want it daily. Output: `~/.claude/skill_router_skills_sh.json` (mode 600).
 
 1. **Flagged skills are dropped.** One audit partner reporting a high/critical/malicious result removes the skill.
    `clean` means at least one partner passed it and none objected; most skills are `unaudited` and the card says so.
+   The build **fails closed**: if the audits page cannot be read, nothing is written and the previous screened
+   cache stays. Set `SKILL_ROUTER_REQUIRE_CLEAN=1` to suggest only skills an audit partner explicitly passed
+   (a much smaller set; most skills are unaudited).
 2. **A description is required.** Name-only matching is noise.
 3. **Match, then popularity.** The existing token-overlap gate decides if anything is suggested; installs only break
    ties between equally good matches. A popular skill never outranks a better fit.

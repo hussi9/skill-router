@@ -375,7 +375,15 @@ def build(fetcher: Callable[[str], str] = fetch, *, offline: bool = False, max_p
             continue
         boards[path] = board_rows(html)
 
-    audits = {f"{r['source']}/{r['skillId']}": audit_verdict(r) for r in boards.get(AUDITS, [])}
+    # Fail closed: without the audits board there is no way to tell a flagged skill from an
+    # unaudited one, so a partial build must not replace a cache that had screened data.
+    if not boards.get(AUDITS):
+        errors.append("audits board unavailable: refusing to build an unscreened catalog")
+        return {"catalogs": {"skills.sh": []},
+                "metadata": {"generated_at": now, "source": f"https://{HOST}", "boards": sorted(boards),
+                             "audited": 0, "total": 0, "errors": errors,
+                             "note": "suggestion cache only; nothing here is installed or invoked"}}
+    audits = {f"{r['source']}/{r['skillId']}": audit_verdict(r) for r in boards[AUDITS]}
 
     cand: dict[str, dict] = {}
     for path in BOARDS:
