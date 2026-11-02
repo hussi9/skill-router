@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.0.0 (public) — 2026-11-01
+
+First public release of the line developed internally as v4.x. Version numbers here are the public ones.
+
+- **Jev documented end to end** (`docs/jev.md`): what it decides, the 0.8 gate, tier → sub-agent model,
+  fallback chain, cost/latency, exactly what leaves the machine, every knob.
+- **Portable**: no machine-specific paths. `settings-hooks.json` uses `$HOME`; the memory index is derived from
+  the home directory (`SKILL_ROUTER_MEMORY_INDEX` overrides); card text no longer names a path.
+- **Clean checkout passes the gate**: the test that audits your live `~/.claude/agents` is opt-in
+  (`SKILL_ROUTER_CHECK_LIVE=1`).
+- **Privacy**: benchmark inputs that contain real prompts are git-ignored and kept local; published evidence
+  carries hashes only.
+- **skills.sh suggestions** (`scripts/skills_sh_catalog.py`, `docs/skills-sh.md`): opt-in cache of the all-time,
+  trending and hot leaderboards plus security audits, used only when nothing installed fits. Flagged skills dropped,
+  popularity breaks ties but never beats a better match, categories by keyword with optional Jev refinement
+  (`--refine`), per-category top list in `docs/skills-sh-top.md`. Public HTML pages only (not `/api/`, which
+  robots.txt disallows), polite and bounded.
+- Internal history below is unchanged (v4.2 and earlier).
+
 ## v4.2 — 2026-09-22
 
 - **Work tier → model** (`jev_choose.py` question `tier`): the same Jev call now says whether the

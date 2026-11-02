@@ -31,6 +31,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 # Calibration measures deterministic regex/table routing, not the live
 # dogfood embedder daemon.
 os.environ.setdefault("SKILL_ROUTER_NO_EMBED", "1")
+# A deterministic gate must never spend provider calls through the fallback.
+os.environ["SKILL_ROUTER_LLM"] = "0"
+os.environ["SKILL_ROUTER_JEV"] = "0"
+os.environ["SKILL_ROUTER_NO_LEARN"] = "1"
 
 import router  # type: ignore[import-not-found]
 
@@ -223,7 +227,12 @@ def evaluate() -> dict:
     skill_eligible = 0
     misses: list[dict] = []
 
-    for case in CASES:
+    # A case that expects a skill this machine does not have measures the install,
+    # not the router. Scoring it would make the gate pass or fail by who runs it.
+    active = [c for c in CASES if not c.skill or router.valid_skill(c.skill)]
+    excluded = [c.skill for c in CASES if c not in active]
+
+    for case in active:
         # Use route() (not main()) to avoid touching the pending-state file.
         # Bypass the escape-hatch handling in main() by routing directly.
         if any(m in case.prompt.lower() for m in router.ESCAPE_MARKERS):
@@ -260,7 +269,7 @@ def evaluate() -> dict:
             })
 
     total_path_correct = sum(d["tp"] for d in by_path.values())
-    total = len(CASES)
+    total = len(active)
     path_accuracy = total_path_correct / total * 100
     skill_accuracy = (skill_correct / skill_eligible * 100) if skill_eligible else 100.0
 
@@ -279,6 +288,8 @@ def evaluate() -> dict:
 
     return {
         "total": total,
+        "excluded": len(excluded),
+        "excluded_skills": sorted(set(excluded)),
         "path_correct": total_path_correct,
         "path_accuracy": round(path_accuracy, 1),
         "skill_accuracy": round(skill_accuracy, 1),
@@ -293,6 +304,9 @@ def print_report(report: dict, verbose: bool) -> None:
     print(bar)
     print(f"  ROUTER CALIBRATION — {report['total']} prompts")
     print(bar)
+    if report.get("excluded"):
+        print(f"  ({report['excluded']} case(s) skipped: expected skill not installed here — "
+              f"{', '.join(report['excluded_skills'])})")
     print(f"  Path accuracy:  {report['path_correct']}/{report['total']}  ({report['path_accuracy']}%)")
     print(f"  Skill accuracy: {report['skill_accuracy']}%  (only counted when path is correct)")
     print()

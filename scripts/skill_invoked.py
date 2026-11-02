@@ -108,7 +108,7 @@ def record_loaded(skill: str, payload: dict) -> None:
         return
     session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR")
                        or Path.home() / ".claude" / "skill_router_session")
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)[:80]
+    safe = session_key(sid)
     try:
         session_dir.mkdir(parents=True, exist_ok=True)
         with (session_dir / f"{safe}.loaded").open("a") as f:
@@ -126,11 +126,15 @@ def log_usage(skill: str) -> None:
         pass
 
 
-def satisfy_pending(skill: str) -> None:
-    if not PENDING.is_file():
+from session_state import pending_path, session_key
+
+
+def satisfy_pending(skill: str, session_id: str = "") -> None:
+    target = pending_path(PENDING, session_id)
+    if target is None or not target.is_file():
         return
     try:
-        data = json.loads(PENDING.read_text() or "{}")
+        data = json.loads(target.read_text() or "{}")
     except (json.JSONDecodeError, OSError):
         return
     if not isinstance(data, dict):
@@ -140,7 +144,7 @@ def satisfy_pending(skill: str) -> None:
         return
     data["remaining"] = [s for s in remaining if s != skill]
     try:
-        PENDING.write_text(json.dumps(data) + "\n")
+        target.write_text(json.dumps(data) + "\n")
     except OSError:
         pass
 
@@ -169,7 +173,8 @@ def main() -> int:
     log_usage(skill)
     log_invoke_event(skill, payload)
     record_loaded(skill, payload)
-    satisfy_pending(skill)
+    if not payload.get("agent_id"):
+        satisfy_pending(skill, str(payload.get("session_id") or ""))
     rearm(skill)
     # Sub-agents already got their brief at SubagentStart; a second nudge
     # inside them would compete with the parent's plan.

@@ -17,3 +17,27 @@ __pycache__/
 .venv/
 data/labeled_corpus.jsonl
 *.sock
+
+# Evidence that holds the author's real prompts (hashes are fine, text is not).
+# Kept locally for reproducing the benchmarks; never published.
+docs/**/cases.json
+docs/**/*-cases.json
+docs/**/blind-bundle.json
+docs/**/excluded-cases.json
+docs/**/live-before.json
+docs/**/jev-decisions.jsonl
+docs/**/install-backup/
+pilots/
+.playwright-mcp/
+.pytest_cache/
+
+# Internal benchmark runs and design notes: reproducible locally, not part of the release.
+docs/jev-*-2026-10-*/*
+!docs/jev-context-2026-10-22/
+!docs/jev-context-2026-10-22/RESULTS.md
+docs/lazycoder-*
+docs/outcome-pilot/
+docs/*-plan.md
+docs/jev-scope-2026-10-22/run-1/
+docs/jev-scope-2026-10-22/*-preflight.json
+SKILL.personal.md

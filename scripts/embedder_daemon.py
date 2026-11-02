@@ -99,7 +99,7 @@ _OPERATE_KEYWORDS = {
     "refactor", "clean", "simplify", "review", "requesting-code-review",
     "verification-before-completion", "deploy", "ship", "optimize", "audit",
     "plan-design-review", "seo-audit", "ads-audit", "land-and-deploy",
-    "aso-audit", "sentigent-review", "plan-ceo-review",
+    "aso-audit", "plan-ceo-review",
 }
 _BROKEN_DESC_PREFIXES = ("Debug", "Fix", "Diagnose")
 _BUILD_DESC_PREFIXES = ("Build", "Create", "Generate", "Design", "Integrate")

@@ -4,7 +4,7 @@
 The collaborative escape hatch (see docs/self-improvement.md). When the router
 announces a skill the model judges wrong for the actual task, the model runs:
 
-    python3 ~/.claude/skills/skill-router/scripts/router_override.py "<reason>"
+    python3 ~/.claude/skills/skill-router/scripts/router_override.py "<reason>" --session-id "<current session id>"
 
 This clears the pending IRON RULE for the current turn AND records the reason so
 the router learns to defer that skill on similar prompts. A reason is required —
@@ -16,7 +16,7 @@ the model doesn't silently ignore the rule (which the Stop hook would block) and
 the user doesn't have to type [no-router] — the model states *why* and proceeds.
 
 Usage:
-    router_override.py "<reason>" [--prompt "<original prompt>"]
+    router_override.py "<reason>" --session-id "<current session id>" [--prompt "<original prompt>"]
 """
 from __future__ import annotations
 
@@ -39,14 +39,17 @@ def main() -> int:
         default=None,
         help="Original user prompt (stored as a hash only, for audit correlation).",
     )
+    ap.add_argument("--session-id", required=True, help="Exact current hook session ID; never inferred from latest state.")
     args = ap.parse_args()
+    if not args.session_id.strip():
+        ap.error("--session-id must not be empty")
 
     reason = (args.reason or "").strip()
     if not reason:
         print("[skill-router] override needs a reason — nothing recorded.", file=sys.stderr)
         return 2
 
-    result = router.record_override(reason, prompt=args.prompt)
+    result = router.record_override(reason, prompt=args.prompt, session_id=args.session_id)
     skill = result.get("skill")
     if skill:
         print(f"[skill-router] override recorded for {skill}: {reason}")

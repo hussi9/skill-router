@@ -127,7 +127,7 @@ decisions default to `ultrathink`; mechanical work to `none`.
 
 - this skill is local-first
 - this skill is for routing and orchestration, not governance
-- for enterprise governance, policy, and proof of judgment, use Sentigent instead of expanding this skill into a control plane
+- for enterprise governance and policy, follow the applicable project policies and approval requirements; do not expand this skill into a control plane
 
 ## Resources
 

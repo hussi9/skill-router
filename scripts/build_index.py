@@ -57,7 +57,10 @@ CATALOG = HOME / ".claude" / "skill_router_catalog.json"
 OUTPUT = HOME / ".claude" / "skill_index.json"
 CACHE_DIR = HOME / ".claude" / "skill_router_cache" / "enrich"
 PERSONAL = HOME / ".claude" / "skills" / "skill-router" / "SKILL.personal.md"
-MEMORY_INDEX = HOME / ".claude" / "projects" / "-Users-airbook" / "memory" / "MEMORY.md"
+# Claude Code keys per-project memory by the project path with "/" and "." turned into "-".
+# The router's memory index is the one for the home directory; override for another project.
+MEMORY_INDEX = Path(os.environ.get("SKILL_ROUTER_MEMORY_INDEX") or
+    HOME / ".claude" / "projects" / re.sub(r"[/.]", "-", str(HOME)) / "memory" / "MEMORY.md")
 
 VERSION = 1
 
@@ -392,7 +395,8 @@ def build(catalog_path: Path = CATALOG, enrich: bool = False,
             "enriched": bool(enr),
         })
     out.sort(key=lambda d: d["name"])
-    return {
+    from routing_descriptions import apply_overlay
+    return apply_overlay({
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "version": VERSION,
         "total": len(out),
@@ -400,7 +404,7 @@ def build(catalog_path: Path = CATALOG, enrich: bool = False,
         "projects": projects,
         "entries": out,
         "agents": cat.get("agents", []),
-    }
+    })
 
 
 def build_and_write(output: Path = OUTPUT, enrich: bool = False) -> dict:

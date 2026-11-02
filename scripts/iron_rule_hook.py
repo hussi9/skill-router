@@ -70,29 +70,33 @@ def read_payload() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def read_pending_state() -> dict:
-    if not PENDING.is_file():
+from session_state import pending_path
+
+
+def read_pending_state(session_id: str = "") -> dict:
+    target = pending_path(PENDING, session_id)
+    if target is None or not target.is_file():
         return {}
     try:
-        data = json.loads(PENDING.read_text() or "{}")
+        data = json.loads(target.read_text() or "{}")
     except (json.JSONDecodeError, OSError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def read_pending() -> list[str]:
-    remaining = read_pending_state().get("remaining")
+def read_pending(session_id: str = "") -> list[str]:
+    remaining = read_pending_state(session_id).get("remaining")
     return [s for s in remaining if isinstance(s, str) and s] if isinstance(remaining, list) else []
 
 
-def pending_tier() -> str:
+def pending_tier(session_id: str = "") -> str:
     """hard | soft. Missing → hard, so an old-format state file keeps the
     behaviour every existing test asserts."""
-    tier = str(read_pending_state().get("tier") or "hard").lower()
+    tier = str(read_pending_state(session_id).get("tier") or "hard").lower()
     return "soft" if tier == "soft" else "hard"
 
 
-def record_soft_skip(skills: list[str]) -> None:
+def record_soft_skip(skills: list[str], session_id: str = "") -> None:
     """A soft route reached turn end without its skill: log it so the learner
     can demote a skill the model keeps declining, and mark the state so the
     second Stop is not blocked again."""
@@ -100,7 +104,7 @@ def record_soft_skip(skills: list[str]) -> None:
         # Next to the pending file, so a test that redirects PENDING never
         # writes fake skips into the live log the learner reads.
         LOG = PENDING.parent / "skill_router_log.jsonl"
-        state = read_pending_state()
+        state = read_pending_state(session_id)
         with LOG.open("a") as f:
             import time
             f.write(json.dumps({
@@ -109,14 +113,18 @@ def record_soft_skip(skills: list[str]) -> None:
                 "prompt_id": state.get("prompt_id"),
             }) + "\n")
         state["soft_asked"] = True
-        PENDING.write_text(json.dumps(state) + "\n")
+        target = pending_path(PENDING, session_id)
+        if target is not None:
+            target.write_text(json.dumps(state) + "\n")
     except OSError:
         pass
 
 
-def clear_pending() -> None:
+def clear_pending(session_id: str = "") -> None:
     try:
-        PENDING.write_text("{}\n")
+        target = pending_path(PENDING, session_id)
+        if target is not None:
+            target.write_text("{}\n")
     except OSError:
         pass
 
@@ -173,26 +181,28 @@ def main() -> int:
     if mode == "stop" and data.get("stop_hook_active"):
         return 0
 
-    remaining = read_pending()
+    session_id = str(data.get("session_id") or "")
+    remaining = read_pending(session_id)
     if not remaining:
         return 0
 
     expected = remaining[0]
+    override_hint = OVERRIDE_HINT.replace('router_override.py "<reason>"', 'router_override.py "<reason>" --session-id ' + json.dumps(session_id))
 
     # Guard 2 — an uninstallable skill cannot be satisfied, so stop asking.
     if not skill_installed(expected):
-        clear_pending()
+        clear_pending(session_id)
         return 0
 
     # Tier — soft routes never block edits. At turn end they ask once: load
     # the skill, or say in one line why it was the wrong call. Either way
     # the learner hears it, and the second Stop is never blocked.
-    if pending_tier() == "soft":
+    if pending_tier(session_id) == "soft":
         if mode != "stop":
             return 0
-        if read_pending_state().get("soft_asked"):
+        if read_pending_state(session_id).get("soft_asked"):
             return 0
-        record_soft_skip(remaining)
+        record_soft_skip(remaining, session_id)
         emit({
             "decision": "block",
             "reason": (
@@ -209,7 +219,7 @@ def main() -> int:
             "decision": "block",
             "reason": (
                 f"[skill-router] You announced a route but never invoked: "
-                f"{', '.join(remaining)}. Invoke it now. {OVERRIDE_HINT}"
+                f"{', '.join(remaining)}. Invoke it now. {override_hint}"
             ),
         })
         return 0
@@ -222,7 +232,7 @@ def main() -> int:
                 f'[skill-router] IRON RULE: your next tool call must be '
                 f'Skill(skill="{expected}"). Edit/Write/Task are blocked until it '
                 f"runs; Read/Glob/Grep/Bash/TodoWrite/Skill stay allowed. "
-                f"{OVERRIDE_HINT}"
+                f"{override_hint}"
             ),
         }
     })

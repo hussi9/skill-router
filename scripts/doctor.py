@@ -237,6 +237,21 @@ def check_llm_stage(r: Report) -> None:
             "python3 scripts/refresh_env.py --verbose (needs Doppler)")
 
 
+def check_skills_sh(r: Report) -> None:
+    """Advisory: the opt-in skills.sh suggestion cache."""
+    import json as _json, os, time as _time
+    f = Path(os.environ.get("SKILL_ROUTER_SKILLS_SH_FILE") or Path.home() / ".claude" / "skill_router_skills_sh.json")
+    try:
+        meta = _json.loads(f.read_text(encoding="utf-8"))["metadata"]
+    except (OSError, ValueError, KeyError):
+        r.check("skills.sh cache", True, "not built (optional) — suggestions use the local online catalog",
+                "python3 scripts/skills_sh_catalog.py")
+        return
+    age = (_time.time() - meta.get("generated_at", 0)) / 86400
+    r.check("skills.sh cache", age < 14, f"{meta.get('total', 0)} skills, {meta.get('audited', 0)} audited clean, {age:.1f} days old",
+            "python3 scripts/skills_sh_catalog.py --force")
+
+
 def check_jev_stage(r: Report) -> None:
     """Advisory: Jev is the first chooser; without its key the lexical + Gemini path runs."""
     try:
@@ -455,6 +470,7 @@ def main() -> int:
     check_catalog(r)
     check_index(r)
     check_jev_stage(r)
+    check_skills_sh(r)
     check_llm_stage(r)
     check_task_hook(r)
     check_deferrals(r)

@@ -48,6 +48,8 @@ OVERRIDES_COUNT = Path.home() / ".claude" / "skill_router_overrides_count.json"
 # soft-suggestion path — strictly local file reads, no network.
 LOCAL_CATALOG_FILE = Path.home() / ".claude" / "skill_router_catalog.json"
 ONLINE_CATALOG_FILE = Path.home() / ".claude" / "skill_router_online_catalog.json"
+# skills.sh leaderboard cache (scripts/skills_sh_catalog.py): popular, audit-screened skills.
+SKILLS_SH_FILE = Path(os.environ.get("SKILL_ROUTER_SKILLS_SH_FILE") or Path.home() / ".claude" / "skill_router_skills_sh.json")
 # Online-suggestion confidence floor — see suggest_online_skill() for scoring.
 # 0.5 = at least half the prompt tokens overlap with the skill text or vice
 # versa (whichever is smaller). Tuned to suppress noise on short prompts.
@@ -114,7 +116,7 @@ ESCAPE_MARKERS = ("[no-router]", "[skip-router]", "[router-off]")
 # router must stand down — no classification, no embedder rescue, no IRON rule.
 # Matches one leading command segment terminated by whitespace or end of string:
 # "/gstack", "/ship prod", "/feature-dev:feature-dev". Deliberately does NOT
-# match a filesystem path like "/Users/airbook/x.py" — there the segment is
+# match a filesystem path like "/Users/example/x.py" — there the segment is
 # followed by "/", not whitespace/end, so the prompt routes normally. Hijacking
 # an explicit command into a *different* skill was the original "router fights
 # the user" bug.
@@ -516,7 +518,7 @@ def iron_rule_block(chain: list[Step]) -> list[str]:
         out.append("[skill-router] Gates before done: " + " · ".join(card.gates[:3]))
     if card.memory:
         out.append("[skill-router] Memory: " + ", ".join(card.memory[:2])
-                   + "  (read from ~/.claude/projects/-Users-airbook/memory/)")
+                   + "  (read from your project's memory/ directory)")
     # Four lines, not nine. This block is injected on every routed turn, so
     # every line is a permanent tax on the context window. State the rule,
     # name the call, name the way out, stop.
@@ -649,6 +651,9 @@ def render(path: str, chain: list[Step], domains: list[str], note: str = "") -> 
 
 # ---- Iron-rule pending state -----------------------------------------------
 
+from session_state import pending_path, session_key
+
+
 def escape_active(prompt: str) -> bool:
     """True if the prompt contains an escape marker that disables the iron rule."""
     lower = prompt.lower()
@@ -667,10 +672,11 @@ def explicit_invocation(prompt: str) -> bool:
 def write_session_route(chain: list[Step], path: str, meta: Optional[dict]) -> None:
     """What sub-agents and the Task hook read: the parent's current route.
 
-    One file per session id under ~/.claude/skill_router_session/, plus
-    latest.json for callers that have no session id. Fail-soft."""
+    One file per session id; missing identity fails open. Fail-soft."""
     meta = meta or {}
     sid = str(meta.get("session_id") or "").strip()
+    if not sid:
+        return
     card = LAST_CARD
     payload = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -692,9 +698,8 @@ def write_session_route(chain: list[Step], path: str, meta: Optional[dict]) -> N
     try:
         session_dir.mkdir(parents=True, exist_ok=True)
         text = json.dumps(payload) + "\n"
-        (session_dir / "latest.json").write_text(text)
         if sid:
-            safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)[:80]
+            safe = session_key(sid)
             (session_dir / f"{safe}.json").write_text(text)
     except OSError:
         pass
@@ -726,8 +731,11 @@ def write_pending(chain: list[Step], path: str, domains: list[str],
     is_multi = (path == "BUILD" and len(domains) >= 2 and len(chain) >= 2
                 and chain[0].skill == "superpowers:writing-plans")
     in_session = chain[:1] if is_multi else chain
-    PENDING.parent.mkdir(parents=True, exist_ok=True)
     meta = meta or {}
+    target = pending_path(PENDING, str(meta.get("session_id") or ""))
+    if target is None:
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "primary": in_session[0].skill,
@@ -738,11 +746,23 @@ def write_pending(chain: list[Step], path: str, domains: list[str],
         "session_id": meta.get("session_id"),
         "prompt_id": meta.get("prompt_id"),
     }
-    PENDING.write_text(json.dumps(payload) + "\n")
+    target.write_text(json.dumps(payload) + "\n")
     write_session_route(chain, path, meta)
 
 
-def clear_pending() -> None:
+def clear_session_route(session_id: str) -> None:
+    """Invalidate only the current turn's brief; loaded skills remain reusable."""
+    key = session_key(session_id)
+    if not key:
+        return
+    session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR") or SESSION_DIR)
+    try:
+        (session_dir / f"{key}.json").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def clear_pending(session_id: str = "") -> None:
     """Clear the pending-state file. Called at the start of each user turn so
     nothing carries over across turns and a misroute cannot deadlock.
 
@@ -751,16 +771,18 @@ def clear_pending() -> None:
     consecutive strikes the skill goes soft (silently dropped from future
     announcements until a successful invoke resets the counter).
     """
-    if not PENDING.is_file():
+    clear_session_route(session_id)
+    target = pending_path(PENDING, session_id)
+    if target is None or not target.is_file():
         return
     try:
-        prior = json.loads(PENDING.read_text() or "{}")
+        prior = json.loads(target.read_text() or "{}")
         unsatisfied = prior.get("remaining") or []
         if unsatisfied:
             _bump_strikes(unsatisfied)
     except (json.JSONDecodeError, OSError):
         pass
-    PENDING.write_text("{}\n")
+    target.write_text("{}\n")
 
 
 # ---- Strike-based soft-mode (per-skill follow-rate enforcement) -------------
@@ -903,7 +925,7 @@ def is_deferred(skill: str) -> bool:
     return is_soft(skill) or is_overridden(skill)
 
 
-def record_override(reason: str, prompt: Optional[str] = None) -> dict:
+def record_override(reason: str, prompt: Optional[str] = None, session_id: str = "") -> dict:
     """Record a reasoned override of the current pending route, then clear it.
 
     The collaborative escape hatch. Instead of the model being forced to invoke
@@ -919,16 +941,18 @@ def record_override(reason: str, prompt: Optional[str] = None) -> dict:
     Returns a summary dict for the CLI wrapper to print.
     """
     reason = (reason or "").strip()
+    target = pending_path(PENDING, session_id)
     announced = ""
     try:
-        if PENDING.is_file():
-            prior = json.loads(PENDING.read_text() or "{}")
+        if target is not None and target.is_file():
+            prior = json.loads(target.read_text() or "{}")
             announced = prior.get("primary") or (prior.get("remaining") or [""])[0] or ""
     except (json.JSONDecodeError, OSError):
         announced = ""
     entry: dict = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "skill": announced,
+        "session_id": session_id or None,
         "reason": reason,
     }
     if prompt:
@@ -943,9 +967,11 @@ def record_override(reason: str, prompt: Optional[str] = None) -> dict:
         pass
     if announced:
         _bump_override_count(announced)
-    # Clear pending so the IRON RULE stops blocking this turn.
+    # Clear both enforcement and the brief so later dispatches cannot reuse it.
+    clear_session_route(session_id)
     try:
-        PENDING.write_text("{}\n")
+        if target is not None:
+            target.write_text("{}\n")
     except OSError:
         pass
     count = _load_overrides_count().get(announced, 0) if announced else 0
@@ -1432,7 +1458,7 @@ def loaded_this_session(meta: dict) -> frozenset[str]:
     sid = str((meta or {}).get("session_id") or "").strip()
     if not sid:
         return frozenset()
-    safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)[:80]
+    safe = session_key(sid)
     session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR") or SESSION_DIR)
     try:
         lines = (session_dir / f"{safe}.loaded").read_text(encoding="utf-8").splitlines()
@@ -1673,17 +1699,19 @@ def _jev_decide(prompt: str):
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import jev_choose  # type: ignore[import-not-found]
-        got = jev_choose.choose(prompt, context=PREV_ASSISTANT)
+        got = jev_choose.choose(prompt, context=PREV_ASSISTANT, session_id=SESSION_ID, prompt_id=PROMPT_ID)
         JEV_TIMED_OUT = got is None and jev_choose.LAST_FAILURE == "timeout"
         return got
     except Exception:
         return None
 
 
-def previous_assistant_tail(meta: dict, chars: int = 300) -> str:
-    """Last `chars` of the assistant text that preceded this prompt, read from
-    the tail of the hook's transcript. Lets "yes please continue" be judged
-    against what it answers. Empty on any problem."""
+def previous_assistant_tail(meta: dict, chars: Optional[int] = None) -> str:
+    """Last assistant text within the bounded transcript window.
+
+    Preserve full available context for JEV's own bounding and truncation guard.
+    Explicit `chars` retains the legacy tail-only helper behavior. Empty on errors.
+    """
     tp = meta.get("transcript_path") if isinstance(meta, dict) else None
     if not tp:
         return ""
@@ -1711,7 +1739,7 @@ def previous_assistant_tail(meta: dict, chars: int = 300) -> str:
             text = "\n".join(p.get("text", "") for p in content or []
                              if isinstance(p, dict) and p.get("type") == "text")
         if text.strip():
-            return text.strip()[-chars:]
+            return text.strip() if chars is None else text.strip()[-chars:]
     return ""
 
 
@@ -1824,6 +1852,7 @@ def _quota():
 
 
 SESSION_ID = ""                      # set by main() in hook mode
+PROMPT_ID = ""
 QUOTA_HINT_EVERY_S = 30 * 60         # one Kimi nudge per band per half hour per session
 
 
@@ -1833,7 +1862,9 @@ def _quota_hint_due(band: str) -> bool:
     Outside hook mode (tests, probes) it is always due and nothing is written."""
     if os.environ.get("SKILL_ROUTER_HOOK_MODE") != "1":
         return True
-    sid = re.sub(r"[^A-Za-z0-9_-]", "_", SESSION_ID or "nosession")[:80]
+    sid = session_key(SESSION_ID)
+    if not sid:
+        return True
     session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR") or SESSION_DIR)
     mark = session_dir / f"{sid}.quota-{band}"
     try:
@@ -2250,11 +2281,16 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
     every prompt does O(novel_skills) set-intersections (fast). Returns
     None if either catalog file is missing / malformed — caller fails open.
     """
-    try:
-        if not ONLINE_CATALOG_FILE.is_file():
-            return None
-        online = json.loads(ONLINE_CATALOG_FILE.read_text())
-    except (OSError, json.JSONDecodeError):
+    online: dict = {"catalogs": {}}
+    for src in (ONLINE_CATALOG_FILE, SKILLS_SH_FILE):
+        try:
+            if src.is_file():
+                part = json.loads(src.read_text())
+                for key, entries in (part.get("catalogs") or {}).items():
+                    online["catalogs"][key] = entries
+        except (OSError, json.JSONDecodeError, AttributeError):
+            continue
+    if not online["catalogs"]:
         return None
 
     # Local catalog: name → installed. Treat missing local file as "nothing
@@ -2280,6 +2316,10 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
             if not isinstance(entry, dict):
                 continue
             if entry.get("installed"):
+                continue
+            if entry.get("audit") == "flagged":
+                continue
+            if entry.get("source") == "online:skills.sh" and not entry.get("description"):
                 continue
             name = entry.get("name")
             if not name or name in local_names:
@@ -2332,7 +2372,10 @@ def suggest_online_skill(prompt: str) -> Optional[dict]:
         if denom == 0:
             continue
         score = count / denom
-        if score > best_score:
+        # Equal evidence: the more adopted skill wins (skills.sh entries carry installs).
+        tie = score == best_score and best_entry is not None and \
+            (entry.get("installs") or 0) > (best_entry.get("installs") or 0)
+        if score > best_score or tie:
             best_score = score
             best_overlap = count
             best_entry = entry
@@ -2350,8 +2393,11 @@ def render_online_suggestion(entry: dict) -> str:
     name = entry.get("name", "?")
     source = entry.get("source", "online")
     install_cmd = entry.get("install_command") or "(no install command provided)"
+    facts = ""
+    if entry.get("installs"):
+        facts = f" ({int(entry['installs']):,} installs · audit: {entry.get('audit', 'unaudited')})"
     return "\n".join([
-        f"[skill-router] No installed skill matches, but `{name}` from {source} might fit.",
+        f"[skill-router] No installed skill matches, but `{name}` from {source}{facts} might fit.",
         f"[skill-router] Install: {install_cmd}",
         "[skill-router] (Skipped — soft suggestion only, no enforcement.)",
     ])
@@ -2427,7 +2473,7 @@ def main() -> int:
     # previous turn from blocking this turn's tools, and means a misrouted
     # turn naturally clears itself when the user types a follow-up.
     if hook_mode:
-        clear_pending()
+        clear_pending(str(hook_meta.get("session_id") or ""))
     if not prompt:
         return 0
     # Escape hatch: user explicitly opts out of routing for this turn.
@@ -2442,8 +2488,9 @@ def main() -> int:
             print("[skill-router] (stand-down — explicit slash-command invocation)",
                   file=sys.stderr)
         return 0
-    global PREV_ASSISTANT, LOADED, SESSION_ID
+    global PREV_ASSISTANT, LOADED, SESSION_ID, PROMPT_ID
     SESSION_ID = str(hook_meta.get("session_id") or "") if hook_mode else ""
+    PROMPT_ID = str(hook_meta.get("prompt_id") or "") if hook_mode else ""
     PREV_ASSISTANT = previous_assistant_tail(hook_meta) if hook_mode else ""
     LOADED = loaded_this_session(hook_meta) if hook_mode else frozenset()
     try:

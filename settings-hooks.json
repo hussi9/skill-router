@@ -8,7 +8,7 @@
             "_skill_router": true,
             "_purpose": "Run the deterministic router and inject the [skill-router] announcement as context before the model's first action.",
             "type": "command",
-            "command": "out=$(SKILL_ROUTER_HOOK_MODE=1 python3 /Users/airbook/.claude/skills/skill-router/scripts/router.py 2>/dev/null); [ -z \"$out\" ] && exit 0; jq -n --arg msg \"$out\" '{systemMessage: $msg, hookSpecificOutput: {hookEventName: \"UserPromptSubmit\", additionalContext: $msg}}'",
+            "command": "out=$(SKILL_ROUTER_HOOK_MODE=1 python3 $HOME/.claude/skills/skill-router/scripts/router.py 2>/dev/null); [ -z \"$out\" ] && exit 0; jq -n --arg msg \"$out\" '{systemMessage: $msg, hookSpecificOutput: {hookEventName: \"UserPromptSubmit\", additionalContext: $msg}}'",
             "timeout": 12
           }
         ]
@@ -23,7 +23,7 @@
             "_skill_router": true,
             "_purpose": "IRON RULE (hard tier only): deny source-mutating tools until the announced skill has been invoked. Soft routes pass. Stands down inside sub-agents.",
             "type": "command",
-            "command": "python3 /Users/airbook/.claude/skills/skill-router/scripts/iron_rule_hook.py pre",
+            "command": "python3 $HOME/.claude/skills/skill-router/scripts/iron_rule_hook.py pre",
             "timeout": 5
           }
         ]
@@ -36,7 +36,7 @@
             "_skill_router": true,
             "_purpose": "Append the parent's route card (skill, gates, memory) to every dispatched sub-agent prompt via updatedInput.",
             "type": "command",
-            "command": "SKILL_ROUTER_HOOK_MODE=1 python3 /Users/airbook/.claude/skills/skill-router/scripts/task_brief.py",
+            "command": "SKILL_ROUTER_HOOK_MODE=1 python3 $HOME/.claude/skills/skill-router/scripts/task_brief.py",
             "timeout": 5
           }
         ]
@@ -51,7 +51,7 @@
             "_skill_router": true,
             "_purpose": "Record the invocation, drop it from pending state, and re-arm the skill by clearing its strike and override tallies.",
             "type": "command",
-            "command": "python3 /Users/airbook/.claude/skills/skill-router/scripts/skill_invoked.py",
+            "command": "python3 $HOME/.claude/skills/skill-router/scripts/skill_invoked.py",
             "timeout": 5
           }
         ]
@@ -65,7 +65,7 @@
             "_skill_router": true,
             "_purpose": "IRON RULE final gate: block turn end if the announced skill was never invoked.",
             "type": "command",
-            "command": "python3 /Users/airbook/.claude/skills/skill-router/scripts/iron_rule_hook.py stop",
+            "command": "python3 $HOME/.claude/skills/skill-router/scripts/iron_rule_hook.py stop",
             "timeout": 5
           }
         ]
@@ -79,7 +79,7 @@
             "_skill_router": true,
             "_purpose": "Tell each dispatched sub-agent which skills fit its job \u2014 the half of the work that previously ran skill-blind.",
             "type": "command",
-            "command": "python3 /Users/airbook/.claude/skills/skill-router/scripts/subagent_brief.py",
+            "command": "python3 $HOME/.claude/skills/skill-router/scripts/subagent_brief.py",
             "timeout": 8
           }
         ]
@@ -94,7 +94,7 @@
             "_skill_router": true,
             "_purpose": "Announce newly installed skills, install candidates that fit recent work, and the usual flow \u2014 three lines, max.",
             "type": "command",
-            "command": "python3 /Users/airbook/.claude/skills/skill-router/scripts/session_brief.py",
+            "command": "python3 $HOME/.claude/skills/skill-router/scripts/session_brief.py",
             "timeout": 3
           }
         ]
@@ -106,7 +106,7 @@
             "_skill_router": true,
             "_purpose": "Rebuild the catalog and the enriched index (enrichment is cached per skill version), refresh cached model keys from Doppler, relearn the overlay, backfill plugin deps.",
             "type": "command",
-            "command": "(python3 /Users/airbook/.claude/skills/skill-router/scripts/build_catalog.py --quiet >/dev/null 2>&1; python3 /Users/airbook/.claude/skills/skill-router/scripts/build_index.py --quiet --enrich >/dev/null 2>&1; python3 /Users/airbook/.claude/skills/skill-router/scripts/refresh_env.py >/dev/null 2>&1; python3 /Users/airbook/.claude/skills/skill-router/scripts/learn.py --quiet --compact --refresh-online >/dev/null 2>&1; bash /Users/airbook/.claude/skills/skill-router/scripts/ensure-plugin-deps.sh >/dev/null 2>&1) &",
+            "command": "(python3 $HOME/.claude/skills/skill-router/scripts/build_catalog.py --quiet >/dev/null 2>&1; python3 $HOME/.claude/skills/skill-router/scripts/build_index.py --quiet --enrich >/dev/null 2>&1; python3 $HOME/.claude/skills/skill-router/scripts/refresh_env.py >/dev/null 2>&1; python3 $HOME/.claude/skills/skill-router/scripts/learn.py --quiet --compact --refresh-online >/dev/null 2>&1; bash $HOME/.claude/skills/skill-router/scripts/ensure-plugin-deps.sh >/dev/null 2>&1) &",
             "timeout": 3
           }
         ]

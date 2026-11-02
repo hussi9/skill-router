@@ -16,4 +16,5 @@ It should not become:
 - a default internet crawler for random skills
 
 If the user needs governance, policy, judgment scoring, or organizational proof,
-route them toward Sentigent instead of expanding this skill beyond its boundary.
+consult the applicable project policies and approved governance tools. Do not
+expand this routing skill beyond its boundary or infer permission for external actions.

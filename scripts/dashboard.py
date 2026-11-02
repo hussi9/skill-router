@@ -12,7 +12,7 @@ One screen, plain ASCII. Tells an operator everything that matters:
 Reads (read-only):
   ~/.claude/skill_router_log.jsonl   chain-start events from router.py
   ~/.claude/skill_usage.log          Skill-tool fires (TAB or SPACE separated)
-  ~/.claude/skill_router_pending.json current pending-state JSON
+  ~/.claude/skill_router_session/*.pending.json session pending-state JSON
 
 Run:
     python3 scripts/dashboard.py             # last 7 days
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import Counter
@@ -148,11 +149,27 @@ def read_pending(path: Path) -> dict:
         data = json.loads(path.read_text() or "{}")
     except (json.JSONDecodeError, OSError):
         return {"present": False, "remaining": [], "name": None}
-    remaining = list(data.get("remaining", [])) if isinstance(data, dict) else []
+    remaining = data.get("remaining", []) if isinstance(data, dict) else []
+    remaining = [item for item in remaining if isinstance(item, str)] if isinstance(remaining, list) else []
     return {
         "present": bool(remaining),
         "remaining": remaining,
         "name": (data.get("name") if isinstance(data, dict) else None),
+    }
+
+
+def read_session_pending() -> dict:
+    """Aggregate active session states; legacy global state is never current."""
+    directory = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR")
+                     or Path.home() / ".claude" / "skill_router_session")
+    states = [read_pending(path) for path in sorted(directory.glob("*.pending.json"))]
+    active = [state for state in states if state["present"]]
+    names = [state["name"] for state in active if isinstance(state["name"], str)]
+    return {
+        "present": bool(active),
+        "remaining": [skill for state in active for skill in state["remaining"]],
+        "name": ", ".join(dict.fromkeys(names)) or None,
+        "sessions": len(active),
     }
 
 
@@ -165,7 +182,7 @@ def build_summary(days: int) -> dict:
     announcements = parse_router_log(ROUTER_LOG, since)
     invocations = parse_usage_log(USAGE_LOG, since)
     corr = correlate(announcements, invocations)
-    pending = read_pending(PENDING)
+    pending = read_session_pending()
 
     n_ann = len(announcements)
     n_inv = len(invocations)

@@ -270,7 +270,7 @@ allowed, so context-gathering, shell work, and the override below keep working.
 2. **Reasoned override** — if you judge the route wrong, don't fight the rule:
 
    ```bash
-   python3 ~/.claude/skills/skill-router/scripts/router_override.py "<reason>"
+   python3 ~/.claude/skills/skill-router/scripts/router_override.py "<reason>" --session-id "<current session id>"
    ```
 
    This clears the rule for the turn, logs your reason, and counts against that
@@ -402,3 +402,6 @@ Personal routes and project guardrails: [`SKILL.personal.md`](./SKILL.personal.m
 "I'll just paraphrase"      → No. The [skill-router] format is the contract.
 "The announcement is wrong" → Overrule it with a reason. Don't ignore it.
 ```
+
+[skill-router] Specialist available: growth-optimizer — full-operator organic+paid growth (web/social/product). Trigger: "optimize/grow traffic or reach for <target>", "SEO/AEO this site", "improve rankings/AI visibility".
+[skill-router] Agents: growth-optimizer (dispatcher), growth-optimizer-web, growth-optimizer-social, growth-optimizer-product.

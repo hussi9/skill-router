@@ -48,3 +48,11 @@ If you want to change a load-bearing design principle (zero-UX, deterministic ro
 ## License
 
 All contributions are MIT, same as the project.
+
+## Tests that need a reference install
+
+Most tests are hermetic. A few classes (`TestRouteCard`, `TestJevRoute`, `TestTieredEnforcement`,
+`TestWorkTierAndQuota`, `TestPendingAndSession`) route real prompts against an index built from the live skill
+catalog and skip themselves when the skills they name (`mac-doctor`, `superpowers:*`) and a `SKILL.personal.md`
+are absent. `SKILL_ROUTER_CHECK_LIVE=1` additionally audits your installed agents. Making these fixture-driven is
+the most useful testing contribution.

@@ -18,6 +18,7 @@ import time
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from typing import Optional
 
@@ -47,7 +48,11 @@ _V3_ENV = {
 def setUpModule() -> None:
     # Re-applied at run time: other test modules adjust the same variables
     # in their own setUpModule, and pytest imports everything first.
+    _ENV_BACKUP.update({name: os.environ.get(name) for name in _V3_ENV})
     os.environ.update(_V3_ENV)
+    _isolate_state()
+    for patcher in _CATALOG_PATCHES:
+        patcher.start()
 
 import router  # type: ignore[import-not-found]
 import embedder_daemon  # type: ignore[import-not-found]
@@ -62,28 +67,42 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 # prompt: the tests wrote the strikes file clean and never looked at the
 # override tally that was actually suppressing the routes.
 _STATE = tempfile.mkdtemp(prefix="router-state-")
-router.PENDING = Path(_STATE) / "pending.json"
-router.STRIKES = Path(_STATE) / "strikes.json"
-router.OVERRIDES_COUNT = Path(_STATE) / "overrides_count.json"
-router.OVERRIDES_LOG = Path(_STATE) / "overrides.jsonl"
-# The learned overlay too. It holds this machine's real follow rates and
-# triggers, and the embedder-rescue refusal reads it — so a test that expects
-# a rescue would pass or fail depending on what the user did last week.
-router.HISTORY = Path(_STATE) / "learned.json"
-router.LEARNED = router.HISTORY
-router.LOG = Path(_STATE) / "log.jsonl"          # belt and braces with NO_LEARN
-router.HISTORY.write_text("{}\n")
-router._load_history.cache_clear()
-for _f in (router.PENDING, router.STRIKES, router.OVERRIDES_COUNT):
-    _f.write_text("{}\n")
+_STATE_ATTRS = ("PENDING", "STRIKES", "OVERRIDES_COUNT", "OVERRIDES_LOG",
+                "HISTORY", "LEARNED", "LOG")
+_STATE_BACKUP: dict = {}
+_ENV_BACKUP: dict = {}
+
+
+def _isolate_state() -> None:
+    _STATE_BACKUP.update({name: getattr(router, name) for name in _STATE_ATTRS})
+    for name in _STATE_ATTRS:
+        setattr(router, name, Path(_STATE) / f"{name.lower()}.json")
+    for name in ("PENDING", "STRIKES", "OVERRIDES_COUNT", "HISTORY"):
+        getattr(router, name).write_text("{}\n")
+    router.LEARNED = router.HISTORY
+    router._load_history.cache_clear()
+
+
+# Table tests declare their installed skills; ghost-guard tests override this
+# loader explicitly to exercise missing skills. No host installation needed.
+_CATALOG_PATCHES = [patch.object(router, "_skill_catalog", return_value=set(['connect-apps', 'feature-dev:feature-dev', 'frontend-design:frontend-design', 'refactor', 'security', 'supabase:supabase', 'superpowers:brainstorming', 'superpowers:finishing-a-development-branch', 'superpowers:requesting-code-review', 'superpowers:systematic-debugging', 'superpowers:test-driven-development', 'superpowers:verification-before-completion', 'superpowers:writing-plans', 'superpowers:writing-skills', 'vercel:deploy', 'vercel:vercel-functions'])),
+                    patch.object(router, "_agent_catalog", return_value=None)]
 
 
 def tearDownModule() -> None:
+    for patcher in reversed(_CATALOG_PATCHES):
+        patcher.stop()
+    for name, value in _STATE_BACKUP.items():
+        setattr(router, name, value)
+    router._load_history.cache_clear()
     shutil.rmtree(_STATE, ignore_errors=True)
     # Do not leak this module's env into the next test file: test_hooks.py
     # asserts that skill_invoked.py logs when learning is *on*.
-    for k in _V3_ENV:
-        os.environ.pop(k, None)
+    for k, value in _ENV_BACKUP.items():
+        if value is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = value
 
 
 # ---- Ground truth from run_routing_test.sh ---------------------------------
@@ -106,7 +125,7 @@ GROUND_TRUTH: list[tuple[int, str, str, str]] = [
     (8,  "Build a new REST API endpoint for user analytics",
          "BUILD", "feature-dev"),
     (9,  "I need to integrate Stripe payments into checkout",
-         "BUILD", "connect-apps" if router.valid_skill("connect-apps") else "writing-plans"),
+         "BUILD", "connect-apps"),
     (10, "Create a new database schema for the notifications system",
          "BUILD", "supabase"),
     (11, "Write a new Claude skill file for ML model routing",
@@ -791,6 +810,8 @@ class TestOnlineCatalogSuggestion(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_real_catalog_loads_under_budget(self) -> None:
+        if os.environ.get("SKILL_ROUTER_CHECK_LIVE") != "1" and not (Path.home() / ".claude" / "skills" / "mac-doctor").exists():
+            self.skipTest("needs the reference skill install (or SKILL_ROUTER_CHECK_LIVE=1)")
         # Use the actual on-disk catalogs (no fixture) to verify the load
         # path + perf budget. Restore loader so cache_clear hits the real one.
         router._online_skill_index = self._real_index  # type: ignore[assignment]
@@ -846,7 +867,7 @@ class TestExplicitInvocation(unittest.TestCase):
 
     def test_filesystem_path_does_not_match(self) -> None:
         # A leading absolute path is NOT a command — must route normally.
-        self.assertFalse(router.explicit_invocation("/Users/airbook/x.py please review"))
+        self.assertFalse(router.explicit_invocation("/Users/example/x.py please review"))
         self.assertFalse(router.explicit_invocation("/etc/hosts"))
 
     def test_normal_prose_does_not_match(self) -> None:
@@ -1025,6 +1046,15 @@ class TestLoggingIsHookModeOnly(unittest.TestCase):
 
 
 class TestPersonalRoutes(unittest.TestCase):
+    def setUp(self) -> None:
+        fixture = Path(_STATE) / "personal.md"
+        fixture.write_text('```yaml\nroutes:\n  - name: fixture-project\n    when: ["fixtureproject"]\n    skill: refactor\n    path: OPERATE\n```\n')
+        patcher = patch.object(router, "PERSONAL_FILE", fixture)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        router.load_personal_routes.cache_clear()
+        self.addCleanup(router.load_personal_routes.cache_clear)
+
     """Project routes are the only layer that can tell one project from another."""
 
     def test_routes_parse_from_personal_file(self) -> None:

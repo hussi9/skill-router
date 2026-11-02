@@ -15,7 +15,7 @@ and on one that lacks it the payload is simply ignored — nothing breaks.
 
 Stands down when:
   - the call comes from inside a sub-agent (`agent_id` present),
-  - no route exists for this session (or latest.json is older than 2 h),
+  - no route exists for this session (or its route is older than 2 h),
   - the prompt already carries a [skill-router] block,
   - the tool input has no string `prompt`.
 
@@ -60,13 +60,17 @@ def read_payload() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+from session_state import session_key
+
+
 def load_route(session_id: str) -> dict:
     session_dir = Path(os.environ.get("SKILL_ROUTER_SESSION_DIR") or SESSION_DIR)
+    if not session_id.strip():
+        return {}
     cands = []
     if session_id:
-        safe = re.sub(r"[^A-Za-z0-9_-]", "_", session_id)[:80]
+        safe = session_key(session_id)
         cands.append(session_dir / f"{safe}.json")
-    cands.append(session_dir / "latest.json")
     for p in cands:
         if not p.is_file():
             continue
@@ -76,7 +80,7 @@ def load_route(session_id: str) -> dict:
             data = json.loads(p.read_text(encoding="utf-8") or "{}")
         except (OSError, json.JSONDecodeError):
             continue
-        if isinstance(data, dict) and data.get("primary"):
+        if isinstance(data, dict) and data.get("primary") and data.get("session_id") == session_id:
             return data
     return {}
 
@@ -94,7 +98,7 @@ def brief_lines(route: dict) -> list[str]:
     mem = [m for m in route.get("memory", []) if isinstance(m, str)][:2]
     if mem:
         lines.append(f"{MARK} Memory to read first: " + ", ".join(mem)
-                     + " (in ~/.claude/projects/-Users-airbook/memory/)")
+                     + " (in your project's memory/ directory)")
     return lines
 
 
@@ -111,14 +115,14 @@ def tiering_on() -> bool:
             or os.environ.get("SKILL_ROUTER_JEV") == "1")
 
 
-def choose_model(prompt: str) -> tuple[str, dict]:
+def choose_model(prompt: str, session_id: str = "", prompt_id: str = "") -> tuple[str, dict]:
     """(model or "", detail). "" means leave the dispatch alone."""
     if not tiering_on() or any(m in prompt.lower() for m in ESCAPES):
         return "", {}
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import jev_choose  # type: ignore[import-not-found]
-        pick = jev_choose.tier_only(prompt)
+        pick = jev_choose.tier_only(prompt, session_id=session_id, prompt_id=prompt_id)
         model = jev_choose.model_for(pick)
     except Exception:                                   # noqa: BLE001 — never raise into a hook
         return "", {}
@@ -162,7 +166,7 @@ def main() -> int:
     changed = False
     # 1. The model. Only when the caller did not pick one itself.
     if not tool_input.get("model"):
-        model, detail = choose_model(prompt)
+        model, detail = choose_model(prompt, session_id=session_id, prompt_id=str(data.get("prompt_id") or ""))
         if detail:
             log_model(session_id, tool_input, model, detail)
         if model:

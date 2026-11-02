@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
 import threading
@@ -83,8 +84,9 @@ MAX_OPTIONS = 255                    # Choice limit, "none" included
 # skill that shares a builtin's name is indexed as a skill and stays routable.
 NOT_ROUTABLE = ("agent", "command", "plugin-command", "builtin")
 SELF_SKILL = "skill-router"          # the router never routes to its own documentation
-PROMPT_CHARS = 600
-CONTEXT_CHARS = 300
+CACHE_VERSION = 2
+PROMPT_CHARS = 16000
+CONTEXT_CHARS = 4000
 # The previous assistant turn is sent only for short prompts. Measured on 63
 # real pairs: <= 15 words it lifted hits 13 -> 15 and confident routes from
 # 9/11 to 13/14 right ("yes" -> prove-idea at 1.00); on longer prompts it cost
@@ -188,6 +190,8 @@ def load_entries() -> list[dict]:
 
 
 def _summary(e: dict, n: int) -> str:
+    if isinstance(e.get("routing_summary"), str) and e["routing_summary"]:
+        return f"{e['name']}: {e['routing_summary']}"
     use_when = "; ".join(str(u) for u in (e.get("use_when") or [])[:2])
     return f"{e['name']}: {str(e.get('description') or '')[:n]} | {use_when}"[: n + 90]
 
@@ -277,9 +281,52 @@ def _deadline(fn: Callable[[], Optional[dict]], seconds: float) -> Optional[dict
 
 def _conf(a: dict) -> float:
     try:
-        return max(0.0, min(1.0, float(a.get("confidence", 0.0))))
+        value = float(a.get("confidence", 0.0))
+        return value if math.isfinite(value) and 0 <= value <= 1 else 0.0
     except (TypeError, ValueError):
         return 0.0
+
+
+def _bounded(value: str, limit: int) -> tuple[str, dict]:
+    value = (value or "").strip()
+    truncated = len(value) > limit
+    marker = "\n[... input omitted ...]\n"
+    keep = limit - len(marker)
+    sent = value if not truncated else value[:keep // 2] + marker + value[-(keep - keep // 2):]
+    return sent, {"original_chars": len(value), "sent_chars": len(sent),
+                  "truncated": truncated,
+                  "sha256": hashlib.sha256(value.encode()).hexdigest()}
+
+
+def _log_event(event: dict) -> None:
+    """Append one bounded JSON record; never include request text or provider errors."""
+    try:
+        path = CACHE.parent / "jev-decisions.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, (json.dumps(event, allow_nan=False) + "\n").encode())
+        finally:
+            os.close(fd)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def _usage(data: dict) -> int:
+    usage = data.get("usage")
+    try:
+        return max(0, int(usage.get("input_tokens") or 0)) if isinstance(usage, dict) else 0
+    except (ValueError, TypeError, OverflowError):
+        return 0
+
+
+def _safe_work(pick: Pick, truncated: bool) -> Pick:
+    return Pick("heavy", 0.0, "silent") if truncated else pick
+
+
+def _cached_pick(value: dict) -> Pick:
+    conf = _conf(value)
+    return Pick(value.get("name"), conf, tier(conf))
 
 
 def _pick(answers: dict, qids: Sequence[str], keymap: dict[str, dict[str, str]]) -> Optional[Pick]:
@@ -317,115 +364,151 @@ def _fingerprint(questions: dict) -> str:
 def _from_cache(path: Path) -> Optional[Choice]:
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
-        work = Pick(**d["work"]) if isinstance(d.get("work"), dict) else Pick(None, 0.0, "silent")
-        return Choice(Pick(**d["domain"]), Pick(**d["process"]), d["path"],
+        work = _cached_pick(d["work"]) if isinstance(d.get("work"), dict) else Pick(None, 0.0, "silent")
+        return Choice(_cached_pick(d["domain"]), _cached_pick(d["process"]), d["path"],
                       d["path_confidence"], d["ms"], d["tokens"], cached=True, work=work)
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
         return None
+
+
+def _run(prompt: str, context: str, entries: Optional[Sequence[dict]],
+         timeout: Optional[float], operation: str, session_id: Optional[str],
+         prompt_id: Optional[str]):
+    global LAST_FAILURE
+    LAST_FAILURE = ""
+    started = time.monotonic()
+    request, request_meta = _bounded(prompt, PROMPT_CHARS)
+    previous, context_meta = _bounded(context, CONTEXT_CHARS)
+    state = {"request": request}
+    if previous and operation == "choose" and len((prompt or "").split()) <= CONTEXT_MAX_WORDS:
+        state["previous_assistant_message"] = previous
+    else:
+        context_meta = {**context_meta, "sent_chars": 0, "truncated": False}
+    truncated = request_meta["truncated"] or context_meta["truncated"]
+    event = {"schema_version": 1, "timestamp": time.time(), "operation": operation,
+             "provider": "typesafe", "provider_model": MODEL, "cache_version": CACHE_VERSION,
+             "session_id": session_id or os.environ.get("SKILL_ROUTER_SESSION_ID", ""),
+             "prompt_id": prompt_id or os.environ.get("SKILL_ROUTER_PROMPT_ID", ""),
+             "input": {"request": request_meta, "context": context_meta},
+             "cache_hit": False, "provider_attempted": False, "input_tokens": 0,
+             "model_requested": "inherit", "failure": ""}
+
+    def finish(result=None, failure=""):
+        global LAST_FAILURE
+        if failure:
+            LAST_FAILURE = failure
+        event["failure"] = failure
+        event["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+        work = result.work if isinstance(result, Choice) else result
+        if isinstance(work, Pick):
+            event["confidence"] = work.confidence
+            event["work_tier"] = work.name
+            event["model_requested"] = model_for(work)
+        if isinstance(result, Choice):
+            event["confidence_by_question"] = {"domain": result.domain.confidence,
+                "process": result.process.confidence, "path": result.path_confidence,
+                "tier": result.work.confidence}
+        _log_event(event)
+        return result
+
+    if not request:
+        return finish(failure="empty_input")
+    if not enabled():
+        return finish(failure="disabled")
+    key = _key()
+    if not key:
+        return finish(failure="no_key")
+    if operation == "choose":
+        entries = load_entries() if entries is None else entries
+        if not entries:
+            return finish(failure="empty_index")
+        questions, keymap = build_questions(entries)
+    else:
+        questions, keymap = {"tier": tier_question()}, {}
+    fingerprint = _fingerprint(questions)
+    event["index_fingerprint"] = fingerprint
+    # Include full input hashes, so omitted middle text cannot alias another request.
+    h = hashlib.sha256(json.dumps([CACHE_VERSION, MODEL, operation, state,
+        request_meta["sha256"], context_meta["sha256"], fingerprint], sort_keys=True).encode()).hexdigest()
+    cpath = CACHE / f"{h}.json"
+    hit = None
+    if operation == "choose":
+        hit = _from_cache(cpath)
+    else:
+        try:
+            d = json.loads(cpath.read_text(encoding="utf-8"))
+            if isinstance(d.get("work"), dict):
+                hit = _cached_pick(d["work"])
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    if hit is not None:
+        event["cache_hit"] = True
+        if isinstance(hit, Choice):
+            event["cached_input_tokens"] = hit.tokens
+        return finish(hit)
+    secs = TIMEOUT_S if timeout is None else timeout
+    event["provider_attempted"] = True
+    call_started = time.monotonic()
+    data = _deadline(lambda: _post({"model": MODEL, "state": state, "questions": questions},
+                                   key, secs), secs)
+    ms = int((time.monotonic() - call_started) * 1000)
+    answers = data.get("answers") if isinstance(data, dict) else None
+    if not isinstance(answers, dict):
+        return finish(failure="timeout" if data is None and ms >= secs * 1000 * .95 else "error")
+    event["input_tokens"] = _usage(data)
+    work = _safe_work(_tier_pick(answers), truncated)
+    if operation == "choose":
+        domain = _pick(answers, [q for q in questions if q.startswith("domain_")], keymap)
+        process = _pick(answers, ["process"], keymap)
+        if domain is None or process is None:
+            return finish(failure="malformed_answers")
+        # Keep raw chunk decisions separate from the capped aggregate pick.
+        # Only supplied option names are exposed, never request/criteria text.
+        chunks = []
+        named_confidences = []
+        for qid in questions:
+            if not qid.startswith("domain_"):
+                continue
+            raw = answers[qid]
+            selected = keymap[qid].get(raw.get("choice"))
+            confidence = _conf(raw)
+            chunks.append({"question_id": qid, "selected_skill": selected,
+                           "confidence": confidence})
+            if selected is not None:
+                named_confidences.append(confidence)
+        named_confidences.sort(reverse=True)
+        event["domain_chunks"] = chunks
+        event["chunk_conflict"] = (len(named_confidences) > 1
+                                   and named_confidences[1] >= SUGGEST_AT)
+        pa = answers.get("path")
+        path, pconf = "", 0.0
+        if isinstance(pa, dict) and pa.get("choice") in PATHS:
+            path, pconf = pa["choice"], _conf(pa)
+        out = Choice(domain, process, path, pconf, ms, event["input_tokens"], work=work)
+        cached = {k: v for k, v in asdict(out).items() if k != "cached"}
+    else:
+        if not isinstance(answers.get("tier"), dict) or answers["tier"].get("choice") not in TIERS:
+            return finish(failure="malformed_answers")
+        out, cached = work, {"work": asdict(work)}
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        cpath.write_text(json.dumps(cached, allow_nan=False))
+    except (OSError, ValueError):
+        pass
+    return finish(out)
 
 
 def choose(prompt: str, context: str = "", entries: Optional[Sequence[dict]] = None,
-           timeout: Optional[float] = None) -> Optional[Choice]:
-    """Ask Jev which domain skill, which process skill and which path fit `prompt`.
-
-    Args:
-        prompt: the user's request, as typed.
-        context: tail of the previous assistant message, so "yes, continue"
-            can be judged against what it answers. Empty to omit.
-        entries: index entries; defaults to the router's index on disk.
-        timeout: wall-clock seconds; defaults to SKILL_ROUTER_JEV_TIMEOUT (1.2).
-
-    Returns:
-        A Choice, or None on any failure (disabled, no key, empty index,
-        timeout, HTTP error, malformed body). None means "fall back".
-    """
-    prompt = (prompt or "").strip()
-    if not prompt or not enabled():
-        return None
-    key = _key()
-    if not key:
-        return None
-    entries = load_entries() if entries is None else entries
-    if not entries:
-        return None
-    questions, keymap = build_questions(entries)
-    state = {"request": prompt[:PROMPT_CHARS]}
-    context = (context or "").strip()[-CONTEXT_CHARS:]
-    if context and len(prompt.split()) <= CONTEXT_MAX_WORDS:
-        state["previous_assistant_message"] = context
-    h = hashlib.sha1(json.dumps([MODEL, state, _fingerprint(questions)],
-                                sort_keys=True).encode()).hexdigest()
-    cpath = CACHE / f"{h}.json"
-    if cpath.is_file():
-        hit = _from_cache(cpath)
-        if hit is not None:
-            return hit
-    body = {"model": MODEL, "state": state, "questions": questions}
-    t0 = time.time()
-    secs = TIMEOUT_S if timeout is None else timeout
-    global LAST_FAILURE
-    LAST_FAILURE = ""
-    data = _deadline(lambda: _post(body, key, secs), secs)
-    ms = int((time.time() - t0) * 1000)
-    answers = data.get("answers") if isinstance(data, dict) else None
-    if not isinstance(answers, dict):
-        LAST_FAILURE = "timeout" if data is None and ms >= secs * 1000 * 0.95 else "error"
-        return None
-    domain = _pick(answers, [q for q in questions if q.startswith("domain_")], keymap)
-    process = _pick(answers, ["process"], keymap)
-    if domain is None or process is None:
-        return None
-    pa = answers.get("path")
-    path, pconf = "", 0.0
-    if isinstance(pa, dict) and pa.get("choice") in PATHS:
-        path, pconf = pa["choice"], _conf(pa)
-    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-    out = Choice(domain, process, path, pconf, ms, int(usage.get("input_tokens") or 0),
-                 work=_tier_pick(answers))
-    try:
-        CACHE.mkdir(parents=True, exist_ok=True)
-        cpath.write_text(json.dumps({k: v for k, v in asdict(out).items() if k != "cached"}))
-    except OSError:
-        pass
-    return out
+           timeout: Optional[float] = None, *, session_id: Optional[str] = None,
+           prompt_id: Optional[str] = None) -> Optional[Choice]:
+    """Route complete bounded input; oversized head/tail input never earns a downgrade."""
+    return _run(prompt, context, entries, timeout, "choose", session_id, prompt_id)
 
 
-def tier_only(prompt: str, timeout: Optional[float] = None) -> Optional[Pick]:
-    """Just the work tier for `prompt` — the sub-agent dispatch hook's call.
-
-    No index, ~200 input tokens, cached by prompt. None on any failure, and
-    the caller treats None exactly like "heavy": leave the model alone.
-    """
-    prompt = (prompt or "").strip()
-    if not prompt or not enabled():
-        return None
-    key = _key()
-    if not key:
-        return None
-    questions = {"tier": tier_question()}
-    state = {"request": prompt[:PROMPT_CHARS]}
-    h = hashlib.sha1(json.dumps([MODEL, "tier", state, _fingerprint(questions)],
-                                sort_keys=True).encode()).hexdigest()
-    cpath = CACHE / f"{h}.json"
-    try:
-        d = json.loads(cpath.read_text(encoding="utf-8"))
-        if isinstance(d.get("work"), dict):
-            return Pick(**d["work"])
-    except (OSError, json.JSONDecodeError, TypeError):
-        pass
-    secs = TIMEOUT_S if timeout is None else timeout
-    data = _deadline(lambda: _post({"model": MODEL, "state": state, "questions": questions},
-                                   key, secs), secs)
-    answers = data.get("answers") if isinstance(data, dict) else None
-    if not isinstance(answers, dict):
-        return None
-    pick = _tier_pick(answers)
-    try:
-        CACHE.mkdir(parents=True, exist_ok=True)
-        cpath.write_text(json.dumps({"work": asdict(pick)}))
-    except OSError:
-        pass
-    return pick
+def tier_only(prompt: str, timeout: Optional[float] = None, *,
+              session_id: Optional[str] = None, prompt_id: Optional[str] = None) -> Optional[Pick]:
+    """Judge a bounded request. Any omitted input forces inherited execution model."""
+    return _run(prompt, "", None, timeout, "tier", session_id, prompt_id)
 
 
 def status() -> dict:

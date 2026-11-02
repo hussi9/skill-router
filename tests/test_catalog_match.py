@@ -135,12 +135,47 @@ class TestFamilyCollapse(unittest.TestCase):
         self.assertFalse(catalog_match._same_family("market-launch", "debugging-capacitor"))
 
 
-class TestLiveCatalog(unittest.TestCase):
-    """Properties of the catalog actually on this machine."""
+class TestFixtureCatalog(unittest.TestCase):
+    """Stable specialist contracts independent of the host installation."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.index = catalog_match.load_index()
+        cls.path = _fixture_catalog([{'name': 'code-review',
+          'description': 'Review a change for specification compliance, correctness, security and '
+                         'maintainability with severity-rated evidence.',
+          'type': 'skill',
+          'invokable': True},
+         {'name': 'jobhunt-agent',
+          'description': 'Use for jobhunt pipeline status, resume tailoring, applications and job '
+                         'postings',
+          'type': 'skill',
+          'invokable': True},
+         {'name': 'scrollbook-deploy',
+          'description': 'Use for Scrollbook iOS Android deployment, TestFlight build submission and '
+                         'release',
+          'type': 'skill',
+          'invokable': True},
+         {'name': 'security-review',
+          'description': 'Run a comprehensive security review on code',
+          'type': 'skill',
+          'invokable': True},
+         {'name': 'dataviz',
+          'description': 'Use before writing any chart, graph, plot, bar chart, line chart, '
+                         'dashboard, or data visualization in any medium or library — chart type '
+                         'choice, categorical and sequential color palettes, axes, legends, tooltips, '
+                         'sparklines, heatmaps, stat tiles, KPI rows, accessibility in light and '
+                         'dark.',
+          'type': 'builtin',
+          'invokable': True}])
+        raw = json.loads(Path(cls.path).read_text())
+        for entry in raw["entries"]:
+            if entry["name"] == "scrollbook-deploy":
+                entry["description"] = "Use for TestFlight build submission and Scrollbook deployment"
+            if entry["name"] == "jobhunt-agent":
+                entry["description"] = "Use for jobhunt pipeline status and applications"
+        raw["entries"] += [{"name": f"fixture{i}", "description": f"specialty{i}", "invokable": True, "type": "skill"} for i in range(60)]
+        Path(cls.path).write_text(json.dumps(raw))
+        cls.index = catalog_match.load_index(cls.path)
         if cls.index is None:
             raise unittest.SkipTest("no catalog built yet — run build_catalog.py")
 
@@ -179,7 +214,7 @@ class TestLiveCatalog(unittest.TestCase):
             "is there a reason this is slow",
         ):
             with self.subTest(prompt=prompt):
-                self.assertIsNone(catalog_match.best(prompt))
+                self.assertIsNone(catalog_match.best(prompt, catalog_path=self.path))
 
     def test_named_domains_find_their_specialist(self) -> None:
         """When the specialist is installed it must be found. When it has been
@@ -197,7 +232,7 @@ class TestLiveCatalog(unittest.TestCase):
             with self.subTest(prompt=prompt):
                 if expected not in installed:
                     self.skipTest(f"{expected} is not installed on this machine")
-                match = catalog_match.best(prompt)
+                match = catalog_match.best(prompt, catalog_path=self.path)
                 self.assertIsNotNone(match, f"{prompt!r} found no specialist")
                 self.assertEqual(match.name, expected)
 
@@ -205,7 +240,7 @@ class TestLiveCatalog(unittest.TestCase):
         import time
         start = time.perf_counter()
         for _ in range(20):
-            catalog_match.rank("run a technical seo audit and fix the crawl errors")
+            catalog_match.rank("run a technical seo audit and fix the crawl errors", catalog_path=self.path)
         elapsed = (time.perf_counter() - start) / 20
         self.assertLess(elapsed, 0.05,
             f"{elapsed*1000:.0f}ms per query is too slow for a prompt hook")

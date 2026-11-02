@@ -13,7 +13,7 @@ A hook-driven router for Claude Code. It indexes every skill you have installed 
 [skill-router] Invoke step 1/2 now:
 ▶ mac-doctor  (inherit, in-session)
 ▶ superpowers:systematic-debugging  (inherit, in-session)
-[skill-router] Memory: airbook_crash_root_cause  (read from ~/.claude/projects/.../memory/)
+[skill-router] Memory: mac_crash_root_cause  (read from ~/.claude/projects/.../memory/)
 [skill-router] IRON RULE: call Skill(skill="mac-doctor") before any Edit/Write/Task.
 ```
 
@@ -48,12 +48,28 @@ prompt ──► project route (SKILL.personal.md)          deterministic, wins 
 ```
 
 - **Index.** `build_index.py` reads every invokable SKILL.md, extracts "use when" triggers and keywords, and a one-time small-model pass adds more — cached per file hash, so the bill grows only when a skill changes. Third-party skill files are never edited.
+- **Routing descriptions.** `references/routing-descriptions.json` supplies concise, source-hash-pinned summaries and reviewed kind corrections after index enrichment. Upstream skill files stay intact. Rebuilds skip stale rules with warnings; all skills remain available. The JEV confidence threshold remains 0.8.
 - **Projects.** A `projects:` block maps names to skills, memory files and completion gates. "push deenunlock to testflight" no longer lands on the scrollbook deploy skill because both ship to TestFlight.
 - **Precision.** A winner needs real evidence: a project hit, or a distinctive non-generic token in its name, triggers or keywords. "flow" alone never picks `ux-flow`.
 - **Tiers.** Hard (edit block until the skill loads) on the BROKEN path and on project routes with gates. Soft elsewhere: the Stop hook asks once, and the answer teaches the router.
 - **Sub-agents.** A `PreToolUse` hook on `Task` appends the parent's route to every dispatched prompt; `SubagentStart` briefs the agent with its paired skills.
 
 Pipeline detail: [docs/how-it-works.md](./docs/how-it-works.md).
+
+## Jev: the one model on the hot path
+
+Jev (`jev-1.13.0`, TypeSafe System One) is a *chooser*: it picks from options you give it and returns a confidence. It cannot write text, and its answers are opaque keys mapped back to skills the router already knows.
+
+- **Chooses the skill** over your whole index in one ~0.4 s call. Routes only at confidence ≥ 0.8 (32 of 34 right in the author's set); below that the router is silent.
+- **Chooses the model for sub-agents.** `light` work dispatches on Haiku, `standard` on Sonnet, `heavy` and unsure inherit your session model. An explicit `model=` always wins. The main session is never switched.
+- **Optional and fail-safe.** No `TYPESAFE_API_KEY`, `SKILL_ROUTER_JEV=0`, a 1.2 s timeout or any error falls back to local ranking. A slow API never blocks a prompt.
+- **Disclosed.** With a key set, each uncached prompt (plus skill summaries) goes to `api.typesafe.ai`, ~$0.0005. Nothing is sent without a key.
+
+Full detail, data flow and knobs: [docs/jev.md](./docs/jev.md).
+
+## Suggestions from skills.sh
+
+When nothing installed fits, the router can point at a popular, audit-screened skill from [skills.sh](https://skills.sh), with install count and audit status on the line. Opt-in cache (`python3 scripts/skills_sh_catalog.py`), public pages only, no prompt data sent, never installs. Top skills per category: [docs/skills-sh-top.md](./docs/skills-sh-top.md). Detail: [docs/skills-sh.md](./docs/skills-sh.md).
 
 ## Install
 
@@ -65,7 +81,7 @@ python3 ~/.claude/skills/skill-router/scripts/build_catalog.py
 python3 ~/.claude/skills/skill-router/scripts/build_index.py --enrich
 ```
 
-Optional, for the small-model stage: put `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) in the environment, or in Doppler (`shared/prd`) and let `scripts/refresh_env.py` cache it. Without a key the router is lexical-only and still routes.
+Optional, for Jev: `export TYPESAFE_API_KEY=...`. For the fallback small-model stage: put `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) in the environment, or in Doppler (`shared/prd`) and let `scripts/refresh_env.py` cache it. Without a key the router is lexical-only and still routes.
 
 Restart Claude Code. The catalog, index and learner rebuild in the background at every session start.
 
@@ -85,7 +101,7 @@ python3 ~/.claude/skills/skill-router/scripts/index_match.py --all "the prompt"
 
 ## Measured
 
-`tests/calibration.py`, 109 curated prompts, lexical stage only (model stage off for determinism):
+`tests/calibration.py`, 109 curated prompts, lexical stage only (Jev and the small model are off for determinism; cases whose expected skill is not installed on your machine are skipped and counted):
 
 | | v3 (2026-09-07 morning) | v4 |
 |---|---|---|
@@ -102,7 +118,7 @@ The calibration set is curated and encodes the author's expectations; read 99.1 
 - **Project routes and projects** — `SKILL.personal.md`: `routes:` (name → skill, tier, gates) and `projects:` (aliases, skills, memory files, gates). Prove a route fires: `python3 scripts/router.py <<< "your prompt"`.
 - **Agent pairings** — `agent_skills.json`, validated against the index at brief time.
 - **Synonyms and phrases** — `scripts/index_match.py` (`SYNONYMS`, `PHRASES`, `GENERIC`).
-- **Escape hatches** — the user writes `[no-router]`; the model runs `scripts/router_override.py "<reason>"`.
+- **Escape hatches** — the user writes `[no-router]`; the model runs `scripts/router_override.py "<reason>" --session-id "<current session id>"`.
 
 [docs/customizing.md](./docs/customizing.md) has the long form.
 
@@ -132,10 +148,14 @@ Prompt *keywords* are logged, never prompt text. `SKILL_ROUTER_NO_LEARN=1` logs 
 
 **Where does it log?** `~/.claude/skill_usage.log` (every Skill call) and `~/.claude/skill_router_log.jsonl` (announcements, prompts as keywords, invocations, soft-skips). Both feed the learner; both are hook-mode only, so tests and probes never teach the router.
 
+Integrated manual external discovery: [search skills.sh, inspect pinned sources, and optionally rank with JEV](./docs/find-skills.md). It returns candidates for review and does not install or invoke them. [Supplied-candidate ranking](./docs/discovery.md) remains available. [Fresh conversation-context results](./docs/jev-context-2026-10-22/RESULTS.md) show no specialist-routing gain at the unchanged 0.8 threshold.
+
 ## Documentation
 
 | Doc | What you'll learn |
 |---|---|
+| [docs/skills-sh.md](./docs/skills-sh.md) | The skills.sh cache: sources, screening, categories, limits |
+| [docs/jev.md](./docs/jev.md) | What Jev decides, the 0.8 gate, model-per-tier, what leaves your machine |
 | [docs/v4-design.md](./docs/v4-design.md) | The audit that motivated v4, the design, the deliverables |
 | [docs/how-it-works.md](./docs/how-it-works.md) | The pipeline, ranking rules, tiers, sub-agent hand-off |
 | [docs/customizing.md](./docs/customizing.md) | Personal routes, projects, named chains |

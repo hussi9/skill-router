@@ -72,7 +72,7 @@ Fires only when confidence is low and the prompt is > 5 words. Prompt: the user 
 ```
 [skill-router] mac-doctor  (your skill · BROKEN · think)
 [skill-router] then: superpowers:systematic-debugging  ·  agent: none
-[skill-router] gates: none   ·   memory: airbook_crash_root_cause
+[skill-router] gates: none   ·   memory: mac_crash_root_cause
 [skill-router] Invoke: Skill(skill="mac-doctor")   — soft: finish without it and the Stop hook will ask why
 ```
 

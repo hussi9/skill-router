@@ -61,20 +61,22 @@ class TestIronRuleHook(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="iron-"))
         self.pending = self.tmp / "pending.json"
-        self.env = {"HOME": str(self.tmp)}
+        self.env = {"HOME": str(self.tmp), "SKILL_ROUTER_SESSION_DIR": str(self.tmp / "sessions")}
+        (self.tmp / "sessions").mkdir()
         (self.tmp / ".claude").mkdir(parents=True, exist_ok=True)
-        self.live_pending = self.tmp / ".claude" / "skill_router_pending.json"
+        self.live_pending = self.tmp / "sessions" / "hook-test.pending.json"
         (self.tmp / ".claude" / "skills" / "demo-skill").mkdir(parents=True, exist_ok=True)
 
     def seed(self, remaining: list[str]) -> None:
         self.live_pending.write_text(json.dumps({
+            "session_id": "hook-test",
             "primary": remaining[0] if remaining else "",
             "remaining": remaining, "all": remaining,
         }))
 
     def test_denies_edit_while_skill_pending(self) -> None:
         self.seed(["demo-skill"])
-        out = run_hook("iron_rule_hook.py", {"tool_name": "Edit"}, "pre", env=self.env)
+        out = run_hook("iron_rule_hook.py", {"session_id": "hook-test", "tool_name": "Edit"}, "pre", env=self.env)
         decision = json.loads(out)["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "deny")
         self.assertIn('Skill(skill="demo-skill")', decision["permissionDecisionReason"])
@@ -90,30 +92,30 @@ class TestIronRuleHook(unittest.TestCase):
         """
         self.seed(["demo-skill"])
         out = run_hook("iron_rule_hook.py",
-                       {"tool_name": "Edit", "agent_id": "ag_1",
+                       {"session_id": "hook-test", "tool_name": "Edit", "agent_id": "ag_1",
                         "agent_type": "db-expert"}, "pre", env=self.env)
         self.assertEqual(out, "", "enforcement must not reach inside sub-agents")
 
     def test_uninstalled_skill_clears_itself(self) -> None:
         self.seed(["no-such-skill-anywhere"])
-        out = run_hook("iron_rule_hook.py", {"tool_name": "Edit"}, "pre", env=self.env)
+        out = run_hook("iron_rule_hook.py", {"session_id": "hook-test", "tool_name": "Edit"}, "pre", env=self.env)
         self.assertEqual(out, "", "a skill that cannot be invoked cannot be required")
         self.assertEqual(json.loads(self.live_pending.read_text()), {})
 
     def test_stop_blocks_unsatisfied_route(self) -> None:
         self.seed(["demo-skill"])
-        out = run_hook("iron_rule_hook.py", {}, "stop", env=self.env)
+        out = run_hook("iron_rule_hook.py", {"session_id": "hook-test"}, "stop", env=self.env)
         self.assertEqual(json.loads(out)["decision"], "block")
 
     def test_stop_does_not_recurse(self) -> None:
         self.seed(["demo-skill"])
-        out = run_hook("iron_rule_hook.py", {"stop_hook_active": True},
+        out = run_hook("iron_rule_hook.py", {"session_id": "hook-test", "stop_hook_active": True},
                        "stop", env=self.env)
         self.assertEqual(out, "", "blocking a turn we already blocked loops forever")
 
     def test_no_pending_state_is_silent(self) -> None:
         self.assertEqual(
-            run_hook("iron_rule_hook.py", {"tool_name": "Edit"}, "pre", env=self.env), "")
+            run_hook("iron_rule_hook.py", {"session_id": "hook-test", "tool_name": "Edit"}, "pre", env=self.env), "")
 
     def test_malformed_input_is_silent(self) -> None:
         proc = subprocess.run(
@@ -129,14 +131,15 @@ class TestSkillInvokedHook(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="invoked-"))
         (self.tmp / ".claude").mkdir(parents=True, exist_ok=True)
-        self.env = {"HOME": str(self.tmp)}
-        self.pending = self.tmp / ".claude" / "skill_router_pending.json"
+        self.env = {"HOME": str(self.tmp), "SKILL_ROUTER_SESSION_DIR": str(self.tmp / "sessions")}
+        (self.tmp / "sessions").mkdir()
+        self.pending = self.tmp / "sessions" / "hook-test.pending.json"
         self.usage = self.tmp / ".claude" / "skill_usage.log"
 
     def test_satisfies_pending_and_logs(self) -> None:
         self.pending.write_text(json.dumps(
-            {"primary": "alpha", "remaining": ["alpha", "beta"], "all": ["alpha", "beta"]}))
-        run_hook("skill_invoked.py", {"tool_input": {"skill": "alpha"}}, env=self.env)
+            {"session_id": "hook-test", "primary": "alpha", "remaining": ["alpha", "beta"], "all": ["alpha", "beta"]}))
+        run_hook("skill_invoked.py", {"session_id": "hook-test", "tool_input": {"skill": "alpha"}}, env=self.env)
         self.assertEqual(json.loads(self.pending.read_text())["remaining"], ["beta"])
         self.assertIn("alpha", self.usage.read_text())
 
@@ -168,6 +171,8 @@ class TestSubagentBrief(unittest.TestCase):
                     "", "a generic agent has no domain, so any skill is noise")
 
     def test_paired_agent_gets_its_skills(self) -> None:
+        if os.environ.get("SKILL_ROUTER_CHECK_LIVE") != "1" and not (Path.home() / ".claude" / "skills" / "mac-doctor").exists():
+            self.skipTest("needs the reference skill install (or SKILL_ROUTER_CHECK_LIVE=1)")
         out = run_hook("subagent_brief.py", {"agent_type": "test-runner"},
                        env={"SKILL_ROUTER_NO_LOG": "1"})
         payload = json.loads(out)["hookSpecificOutput"]
@@ -398,6 +403,10 @@ class TestAgentModels(unittest.TestCase):
             "haiku is the one intentional downgrade — bulk read-only work")
 
     def test_live_agents_do_not_override_the_session(self) -> None:
+        # Inspects the developer's own ~/.claude/agents, so it is opt-in: a clean
+        # checkout or a stranger's machine must not fail on files this repo does not own.
+        if os.environ.get("SKILL_ROUTER_CHECK_LIVE") != "1":
+            self.skipTest("set SKILL_ROUTER_CHECK_LIVE=1 to audit your installed agents")
         agents = Path.home() / ".claude" / "agents"
         if not agents.is_dir():
             self.skipTest("no agents directory")

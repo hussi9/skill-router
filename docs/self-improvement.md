@@ -29,7 +29,7 @@ There are two demotion signals, both self-tuning and both reset by a successful 
 - **Strikes** (passive) — the model *silently* ignored an announced skill. At
   `STRIKE_THRESHOLD` misses the skill goes soft (dropped from announcements).
 - **Reasoned overrides** (active, the ask+learn loop) — the model ran
-  `scripts/router_override.py "<reason>"` to overrule a route and *said why*. A reasoned
+  `scripts/router_override.py "<reason>" --session-id "<current session id>"` to overrule a route and *said why*. A reasoned
   "this is wrong" is a stronger signal than a silent miss, so it carries its own
   `OVERRIDE_THRESHOLD`. The `reason` strings are the highest-value tuning data: grep
   `skill_router_overrides.jsonl` to see *why* a skill keeps getting rejected and fix the

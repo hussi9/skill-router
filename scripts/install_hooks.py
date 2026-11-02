@@ -10,7 +10,7 @@ routing had been silently inert for months while every other part of the system
 looked healthy.
 
 Merging, not overwriting, is the whole point: this machine's settings.json also
-carries Sentigent hooks on UserPromptSubmit / PreToolUse / PostToolUse, a gstack
+may carry safety hooks on UserPromptSubmit / PreToolUse / PostToolUse, a gstack
 Stop hook, and a formatter. Claude Code runs every hook whose matcher fits, so
 these coexist — but only if the installer adds entries beside them instead of
 replacing the arrays.

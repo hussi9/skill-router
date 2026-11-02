@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +37,16 @@ import index_match  # type: ignore[import-not-found]
 import router  # type: ignore[import-not-found]
 
 INDEX = _STATE / "skill_index.json"
+
+# These are integration tests against the author's reference install (mac-doctor,
+# superpowers, the personal project routes). On a machine without it they would
+# measure the install, not the router, so they skip rather than fail. Hermetic
+# fixtures for them are the next testing task; see CONTRIBUTING.md.
+REFERENCE_INSTALL = (router.valid_skill("mac-doctor")
+                     and router.valid_skill("superpowers:systematic-debugging")
+                     and (ROOT / "SKILL.personal.md").exists())
+needs_reference_install = unittest.skipUnless(
+    REFERENCE_INSTALL, "needs the reference skill install and SKILL.personal.md")
 _REAL_INDEX_FILE = index_match.INDEX_FILE
 
 
@@ -81,6 +92,7 @@ def run_hook(script: str, payload: dict, *args: str, env: dict | None = None) ->
     return proc.stdout.strip()
 
 
+@needs_reference_install
 class TestRouteCard(unittest.TestCase):
     def test_domain_skill_leads_the_chain_on_broken(self) -> None:
         path, chain, _, text = router.route("my macbook restarted again last night, can you check why")
@@ -112,18 +124,34 @@ class TestRouteCard(unittest.TestCase):
         self.assertEqual((path, chain, text), ("SKIP", [], ""))
 
     def test_design_review_is_operate_and_names_a_design_skill(self) -> None:
-        path, chain, _, text = router.route("review the design of the deenunlock home protection card")
-        self.assertEqual(path, "OPERATE")
-        # lexical-only (model stage off here): either design skill is acceptable,
-        # and it must be a soft route on the user's own skill
-        self.assertIn(chain[0].skill, ("design-review", "ui-pattern", "plan-design-review"))
-        self.assertIn("Soft route", text)
+        # Exercise real lexical ranking and route construction against a fixed
+        # population, so newly installed design skills cannot change the winner.
+        fixture = _STATE / "design-index.json"
+        entries = [{"name": "design-review", "kind": "design", "owner": "user",
+                    "description": "Review the design of application screens and cards",
+                    "use_when": ["review home protection card design"],
+                    "keywords": ["design", "review", "home", "protection", "card"]}]
+        entries += [{"name": f"fixture-{i}", "kind": "domain", "owner": "user",
+                     "description": f"specialty{i}"} for i in range(30)]
+        fixture.write_text(json.dumps({"entries": entries}))
+        index_match.load_index.cache_clear()
+        try:
+            with patch.object(index_match, "INDEX_FILE", fixture), \
+                 patch.object(router, "_skill_catalog", return_value={"design-review"}):
+                path, chain, _, text = router.route(
+                    "review the design of the deenunlock home protection card")
+            self.assertEqual(path, "OPERATE")
+            self.assertEqual(chain[0].skill, "design-review")
+            self.assertIn("Soft route", text)
+        finally:
+            index_match.load_index.cache_clear()
 
     def test_supabase_task_in_scrollbook_is_not_book_authoring(self) -> None:
         _, chain, _, _ = router.route("add row level security to the scrollbook briefings table in supabase")
         self.assertNotIn("claude-author", [s.skill for s in chain])
 
 
+@needs_reference_install
 class TestPendingAndSession(unittest.TestCase):
     def test_hook_mode_writes_tier_and_session_route(self) -> None:
         env = dict(os.environ, SKILL_ROUTER_HOOK_MODE="1", SKILL_ROUTER_NO_LEARN="1")
@@ -134,16 +162,16 @@ class TestPendingAndSession(unittest.TestCase):
                               timeout=60, env=env)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("mac-doctor", proc.stdout)
-        pending = json.loads((Path.home() / ".claude" / "skill_router_pending.json").read_text())
+        pending = json.loads((_STATE / "session" / "sess-v4.pending.json").read_text())
         self.assertEqual(pending.get("tier"), "hard")
         self.assertEqual(pending.get("remaining", [None])[0], "mac-doctor")
         sess = json.loads((_STATE / "session" / "sess-v4.json").read_text())
         self.assertEqual(sess["primary"], "mac-doctor")
         self.assertEqual(sess["tier"], "hard")
-        # leave the live pending file clean for the user's session
-        (Path.home() / ".claude" / "skill_router_pending.json").write_text("{}\n")
+        (_STATE / "session" / "sess-v4.pending.json").write_text("{}\n")
 
 
+@needs_reference_install
 class TestTieredEnforcement(unittest.TestCase):
     def _pending(self, tier: str, **extra) -> Path:
         p = Path(tempfile.mkdtemp()) / "pending.json"
@@ -232,6 +260,7 @@ class TestSubagentHandoff(unittest.TestCase):
         self.assertIn("theaibill", json.loads(out)["hookSpecificOutput"]["additionalContext"])
 
 
+@needs_reference_install
 class TestJevRoute(unittest.TestCase):
     """route_v4 with a Jev answer injected. No network: _jev_decide is replaced."""
 
@@ -396,6 +425,7 @@ class TestJevRoute(unittest.TestCase):
                     os.environ[k] = v
 
 
+@needs_reference_install
 class TestWorkTierAndQuota(unittest.TestCase):
     """v4.2: the work tier on the card, the Kimi nudge, the dispatch model."""
 
@@ -552,7 +582,7 @@ class TestDispatchModel(unittest.TestCase):
         os.environ.pop("SKILL_ROUTER_SUBAGENT_MODEL", None)
 
     def fake(self, name, conf):
-        self.jev.tier_only = lambda prompt, timeout=None: self.jev.Pick(name, conf, self.jev.tier(conf))
+        self.jev.tier_only = lambda prompt, timeout=None, **kwargs: self.jev.Pick(name, conf, self.jev.tier(conf))
 
     def run_main(self, payload: dict) -> dict:
         import io
@@ -599,7 +629,7 @@ class TestDispatchModel(unittest.TestCase):
         self.assertEqual(self.run_main({"tool_input": {"prompt": "grep for TODO"}}), {})
 
     def test_jev_failure_leaves_the_dispatch_alone(self) -> None:
-        self.jev.tier_only = lambda prompt, timeout=None: None
+        self.jev.tier_only = lambda prompt, timeout=None, **kwargs: None
         self.assertEqual(self.run_main({"tool_input": {"prompt": "grep for TODO"}}), {})
 
     def test_model_and_brief_compose(self) -> None:

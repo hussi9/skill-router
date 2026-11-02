@@ -55,7 +55,7 @@ The v3 router was hard everywhere and the learner showed `writing-plans` followe
 ```json
 {"name": "mac-doctor", "kind": "domain", "owner": "user", "hub": true,
  "use_when": ["mac restarts", "kernel panic", "disk full"], "keywords": ["macos", "pmset", ...],
- "projects": ["macbook", "mac mini", "kernel panic"], "gates": [], "memory": ["airbook_crash_root_cause"],
+ "projects": ["macbook", "mac mini", "kernel panic"], "gates": [], "memory": ["mac_crash_root_cause"],
  "source_hash": "3f1a…"}
 ```
 

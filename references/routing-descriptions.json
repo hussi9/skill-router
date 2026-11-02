@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "rules": {
+    "analytics-product": {
+      "expected_source_hash": "83feb93ca430",
+      "routing_summary": "Interpret product behavior and metrics: conversion funnels, cohorts, retention, DAU/MAU, experiments, north-star metrics and product dashboards. Also covers event tracking; analytics-tracking specializes in instrumentation reliability."
+    },
+    "analytics-tracking": {
+      "expected_source_hash": "9ba461c9a119",
+      "routing_summary": "Design, implement, audit and validate analytics instrumentation so events and conversions produce trustworthy decision data. Fix signal quality and measurement readiness before relying on dashboards.",
+      "routing_kind": "domain"
+    },
+    "architect-review": {
+      "expected_source_hash": "271008c01b65",
+      "routing_summary": "Assess existing system architecture or major design changes for scalability, resilience, maintainability and standards compliance; provide architectural findings and guidance."
+    },
+    "architecture": {
+      "expected_source_hash": "93beebad75ee",
+      "routing_summary": "Select a system design using requirements, constraints, pattern selection and trade-off evaluation; capture rationale in ADRs. Use architect-review to assess an existing design and architecture-decision-records for ADR practices."
+    },
+    "architecture-decision-records": {
+      "expected_source_hash": "b6692f5a76b1",
+      "routing_summary": "Create, maintain and review Architecture Decision Records: document technical choices, context, alternatives and rationale, including historical decisions. Use architecture for broader requirements and pattern-selection decisions."
+    },
+    "code-review": {
+      "expected_source_hash": "6b2911fb1bc2",
+      "routing_summary": "Perform a code-change review for specification compliance, correctness, security and maintainability; produce severity-rated findings with evidence. Use requesting-code-review to arrange a separate reviewer."
+    },
+    "code-reviewer": {
+      "expected_source_hash": "9d604b09a30c",
+      "routing_summary": "Perform detailed code analysis and review with actionable findings and verification. Reviewing code is the task; requesting-code-review instead prepares and dispatches an independent reviewer."
+    },
+    "copy-editing": {
+      "expected_source_hash": "ff76af0488ae",
+      "routing_summary": "Polish existing marketing copy through focused editing passes while preserving its core message: clarity, concision, flow, proofreading and freshness. New page copy or substantial rewrites use copywriting."
+    },
+    "copywriting": {
+      "expected_source_hash": "04bf80717753",
+      "routing_summary": "Write new marketing page copy or substantially rewrite headlines, value propositions, CTAs and page messaging. For focused edits preserving existing core message, use copy-editing."
+    },
+    "debugger": {
+      "expected_source_hash": "e4b8e06319bd",
+      "routing_summary": "Investigate and fix concrete errors, failing tests or unexpected behavior: capture evidence, isolate root cause, implement and verify a fix. Debugging execution expertise; systematic-debugging supplies the investigation workflow."
+    },
+    "email-sequence": {
+      "expected_source_hash": "722861f84083",
+      "routing_summary": "Plan email marketing sequences: welcome/onboarding emails, lead nurture, re-engagement, post-purchase, education and sales. Define triggers, timing, audience and conversion goals; in-app onboarding screens alone are outside this email workflow."
+    },
+    "emails": {
+      "expected_source_hash": "21d39f59485f",
+      "routing_summary": "Design and optimize lifecycle email programs: welcome/onboarding emails, drip campaigns, nurture, re-engagement and triggered sequences. This is email messaging and automation; in-app onboarding screens alone are outside that scope."
+    },
+    "github": {
+      "expected_source_hash": "d66a49d2fee7",
+      "routing_summary": "Fetch, list and inspect GitHub issues, PRs, Actions runs and logs through gh/API. CI status and log retrieval fit here; diagnosing the underlying code failure uses debugging."
+    },
+    "pdf": {
+      "expected_source_hash": "63b0f7d68396",
+      "routing_summary": "Work with PDF files: extract text/tables, merge, split, rotate, watermark, fill forms, encrypt, OCR or create PDFs. Authored PDFs require an appropriate document pipeline plus rendered-page layout inspection; choose the authoring skill by document type."
+    },
+    "requesting-code-review": {
+      "expected_source_hash": "02b5c14da093",
+      "routing_summary": "Arrange an independent code review: prepare implementation context, requirements and base/head revisions, dispatch a reviewer, then act on findings. This coordinates review rather than performing the analysis itself.",
+      "routing_kind": "process"
+    },
+    "superpowers:receiving-code-review": {
+      "expected_source_hash": "f9c95ed02550",
+      "routing_summary": "Evaluate received review feedback against codebase reality before implementing suggestions: understand, verify technical correctness, respond and test each change. Use when review comments already exist."
+    },
+    "superpowers:requesting-code-review": {
+      "expected_source_hash": "d0d8ac55a5be",
+      "routing_summary": "Arrange an independent code review with precisely crafted requirements, implementation context and base/head revisions. Dispatch a reviewer using bounded context rather than session history; evaluate findings before continuing."
+    },
+    "superpowers:systematic-debugging": {
+      "expected_source_hash": "f7ba47e8781c",
+      "routing_summary": "Root-cause investigation workflow before proposing bug fixes: reproduce, gather evidence, form and test hypotheses, then implement. Applies to errors, failed tests and unexpected behavior."
+    },
+    "systematic-debugging": {
+      "expected_source_hash": "7233547d94b9",
+      "routing_summary": "Root-cause investigation workflow before proposing bug fixes: reproduce, gather evidence, form and test hypotheses, then implement. Applies to errors, failed tests and unexpected behavior.",
+      "routing_kind": "process"
+    }
+  }
+}

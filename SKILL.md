@@ -17,7 +17,7 @@ and injects a **route card** before your first action. Your job is to
 ▶ mac-doctor  (inherit, in-session)
 ▶ superpowers:systematic-debugging  (inherit, in-session)
 [skill-router] Gates before done: simulator screenshot
-[skill-router] Memory: airbook_crash_root_cause  (read from ~/.claude/projects/-Users-airbook/memory/)
+[skill-router] Memory: mac_crash_root_cause  (read from your project's memory/ directory)
 [skill-router] IRON RULE: call Skill(skill="mac-doctor") before any Edit/Write/Task.
 ```
 
@@ -33,7 +33,7 @@ and injects a **route card** before your first action. Your job is to
 | `IRON RULE: …` | **hard** — Edit/Write/Task are denied until the skill is loaded. BROKEN path, and project routes with gates. |
 | `Soft route: …` | **soft** — nothing is blocked. If you finish without loading it, the Stop hook asks once; answer by loading it or by one line `[skill-router] skipped <skill>: <reason>`. |
 
-Wrong route either way: `python3 ~/.claude/skills/skill-router/scripts/router_override.py "<reason>"`.
+Wrong route either way: `python3 ~/.claude/skills/skill-router/scripts/router_override.py "<reason>" --session-id "<current session id>"`.
 The user can also write `[no-router]` in their message.
 
 ## How the card is decided
@@ -76,6 +76,16 @@ Enforcement never reaches inside a sub-agent.
 Non-trivial task, no `[skill-router]` line? Run the fallback yourself:
 `python3 ~/.claude/skills/skill-router/scripts/router.py <<< "the prompt"`.
 If that is silent too, routing may be dead: `python3 ~/.claude/skills/skill-router/scripts/doctor.py`.
+
+## Find an external skill
+
+When the user asks to find a skill or extend capabilities, use the integrated manual discovery command with short public search terms:
+
+```sh
+python3 scripts/find_skills.py --query 'react performance' --out /tmp/skill-search-new --rank
+```
+
+Search queries go to skills.sh; `--rank` additionally sends the query and source descriptions to the configured JEV provider. Never pass private conversation history automatically. The command checks the installed index, inspects pinned public SKILL.md sources, and returns candidates with provenance, popularity metadata and structured inspection failures. JEV ranks at the unchanged **0.8** threshold and can abstain. Results require source review and cannot invoke or install a skill. Installation is a separate user-directed action. See [manual discovery](docs/find-skills.md) for bounds, options and partial-result handling. This command does not change prompt hooks or the current installed-skill routing policy.
 
 ## Maintenance
 

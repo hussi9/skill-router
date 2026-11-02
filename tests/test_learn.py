@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -214,6 +215,9 @@ class TestDiscoveryAndOnline(unittest.TestCase):
         self.assertEqual(sorted(d["catalog_snapshot"]), ["a", "b"])
 
     def test_new_skill_is_detected_and_first_seen_persists(self) -> None:
+        clock = patch.object(learn.time, "time", return_value=learn._ts("2026-09-08T00:00:00"))
+        clock.start()
+        self.addCleanup(clock.stop)
         self._catalog(["a", "b", "c"])
         prev = {"catalog_snapshot": ["a", "b"]}
         d = learn.learn_discovery(prev, "2026-09-07T00:00:00")
