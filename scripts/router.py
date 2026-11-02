@@ -2282,12 +2282,17 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
     None if either catalog file is missing / malformed — caller fails open.
     """
     online: dict = {"catalogs": {}}
+    # Trust follows the FILE an entry came from, never the entry's own `source` field.
+    from_sh: set[str] = set()
     for src in (ONLINE_CATALOG_FILE, SKILLS_SH_FILE):
         try:
             if src.is_file():
                 part = json.loads(src.read_text())
                 for key, entries in (part.get("catalogs") or {}).items():
-                    online["catalogs"][key] = entries
+                    tag = f"{'sh' if src == SKILLS_SH_FILE else 'main'}:{key}"
+                    online["catalogs"][tag] = entries
+                    if src == SKILLS_SH_FILE:
+                        from_sh.add(tag)
         except (OSError, json.JSONDecodeError, AttributeError):
             continue
     if not online["catalogs"]:
@@ -2309,7 +2314,7 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
 
     index: list[tuple[dict, frozenset[str]]] = []
     catalogs = online.get("catalogs", {}) if isinstance(online, dict) else {}
-    for entries in catalogs.values():
+    for cat_tag, entries in catalogs.items():
         if not isinstance(entries, list):
             continue
         for entry in entries:
@@ -2323,7 +2328,7 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
             if (entry.get("source") == "online:skills.sh" and entry.get("audit") != "clean"
                     and os.environ.get("SKILL_ROUTER_REQUIRE_CLEAN") == "1"):
                 continue
-            if entry.get("source") == "online:skills.sh":
+            if cat_tag in from_sh:
                 # Re-validate on load: the cache file is data, not code, and its strings reach the model.
                 try:
                     import skills_sh_catalog as _sh  # type: ignore[import-not-found]
@@ -2332,6 +2337,7 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
                 if not entry.get("description") or not _sh.safe_ids(entry.get("author"), entry.get("name")):
                     continue
                 entry = dict(entry)
+                entry["source"] = "online:skills.sh"
                 entry["description"] = _sh.clean_text(entry["description"])
                 entry["install_command"] = _sh.install_command(entry["author"], entry["name"])
             name = entry.get("name")

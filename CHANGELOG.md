@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.0.3 (public) — 2026-11-02
+
+- Identifier checks use `fullmatch` (a trailing newline no longer passes `$`).
+- skills.sh entries are validated because of the **file** they came from, not their self-declared `source`.
+
 ## v2.0.2 (public) — 2026-11-02
 
 - **Registry data is untrusted**: skills.sh `owner/repo` and skill ids must match a plain-identifier pattern or the

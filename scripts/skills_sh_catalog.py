@@ -138,14 +138,14 @@ def arrays_after(text: str, key: str) -> Iterable[list]:
 
 # Registry data is untrusted: it ends up in a printed install command and in text the router
 # injects into the model's context. Identifiers must be plain; descriptions are flattened.
-SOURCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
-SKILL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
+SOURCE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
+SKILL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
 _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2064]")
 
 
 def safe_ids(source: object, skill: object) -> bool:
     return (isinstance(source, str) and isinstance(skill, str)
-            and bool(SOURCE_RE.match(source)) and bool(SKILL_RE.match(skill)))
+            and bool(SOURCE_RE.fullmatch(source)) and bool(SKILL_RE.fullmatch(skill)))
 
 
 def clean_text(s: object, limit: int = 300) -> str:
