@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.2 (public) — 2026-11-02
+
+- **Registry data is untrusted**: skills.sh `owner/repo` and skill ids must match a plain-identifier pattern or the
+  row is dropped; the install command is built with `shlex.quote`; descriptions are flattened to one bounded line
+  with control and invisible characters removed. The router re-validates every skills.sh entry on load and rebuilds
+  the command itself, so a tampered cache file cannot put text of its choosing on the card.
+
 ## v2.0.1 (public) — 2026-11-02
 
 - **skills.sh cache fails closed**: if the audits page cannot be read, the build writes nothing and the previous

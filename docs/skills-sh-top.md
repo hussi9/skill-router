@@ -1,6 +1,6 @@
 # Top skills.sh skills by category (2026-11-02)
 
-344 skills from the all-time, trending and hot boards; 28 audited clean, flagged skills removed. Categories are keyword-assigned (see `CATEGORIES` in `scripts/skills_sh_catalog.py`), so treat a borderline skill's category as a hint.
+349 skills from the all-time, trending and hot boards; 28 audited clean, flagged skills removed. Categories are keyword-assigned (see `CATEGORIES` in `scripts/skills_sh_catalog.py`), so treat a borderline skill's category as a hint.
 
 Install counts measure adoption, not quality or safety. Read the source before installing.
 
@@ -18,7 +18,6 @@ Install counts measure adoption, not quality or safety. Read the source before i
 
 | Skill | Installs | Trend | Audit | What it does |
 |---|---:|---:|---|---|
-| [lark-event](https://www.skills.sh/larksuite/cli/lark-event) | 472,378 | 0.66× | unaudited | Lark/Feishu real-time event listening / subscribing / consuming: stream events as NDJSON via `lark-cli event c |
 | [python-executor](https://www.skills.sh/skills-shell/superpowers/python-executor) | 3,718 | 1.0× | unaudited | Execute Python code in a safe sandboxed environment via [inference.sh](https://inference.sh). Pre-installed: N |
 
 ## business-ops
@@ -26,10 +25,6 @@ Install counts measure adoption, not quality or safety. Read the source before i
 | Skill | Installs | Trend | Audit | What it does |
 |---|---:|---:|---|---|
 | [hyperframes-core](https://www.skills.sh/heygen-com/hyperframes/hyperframes-core) | 930,767 | 1.67× | clean | The HyperFrames composition contract — build one renderable project. Use for composition structure, the `data- |
-| [lark-approval](https://www.skills.sh/larksuite/cli/lark-approval) | 11 | 1.0× | unaudited | 飞书审批：查询和处理审批待办/已办/实例，搜索可发起审批定义、查看定义详情并发起原生审批实例。当用户要处理审批任务、查看审批实例、搜索或发起审批时使用。审批待办不是飞书任务；非审批类待办走 lark-task。不负责创建 |
-| [lark-attendance](https://www.skills.sh/larksuite/cli/lark-attendance) | 11 | 1.0× | unaudited | 飞书考勤打卡：查询自己的考勤打卡记录 |
-| [lark-okr](https://www.skills.sh/larksuite/cli/lark-okr) | 11 | 1.0× | unaudited | 飞书 OKR：管理目标与关键结果。查看和编辑 OKR 周期、目标、关键结果、对齐关系、量化指标和进展记录。当用户需要查看或创建 OKR、管理目标和关键结果、查看对齐关系时使用。不负责：待办任务管理（lark-task）、 |
-| [wecomcli-meeting](https://www.skills.sh/wecomteam/wecom-cli/wecomcli-meeting) | 5 | 1.0× | unaudited | 企业微信会议管理。本技能负责『在线会议』——即含在线会议链接（含会议号/入会链接、可远程或视频参会）的会议的创建、查询、搜索、获取详情（含会议信息、纪要、待办）、查询会议转写原文（逐字发言记录）、更新、取消等全部操作；若 |
 
 ## database
 
@@ -52,9 +47,9 @@ Install counts measure adoption, not quality or safety. Read the source before i
 |---|---:|---:|---|---|
 | [frontend-design](https://www.skills.sh/anthropics/skills/frontend-design) ★ | 1,062,579 | 1.16× | clean | Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps w |
 | [hyperframes-animation](https://www.skills.sh/heygen-com/hyperframes/hyperframes-animation) | 1,005,082 | 2.1× | clean | All animation knowledge for HyperFrames — atomic motion rules, multi-phase scene blueprints, scene transitions |
-| [ui-taste](https://www.skills.sh/uizze.sh/ui-taste) | 901,686 | 2.06× | unaudited | — |
 | [prototype](https://www.skills.sh/mattpocock/skills/prototype) | 1,025,261 | 0.96× | clean | Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a sta |
 | [web-design-guidelines](https://www.skills.sh/vercel-labs/agent-skills/web-design-guidelines) ★ | 812,640 | 1.42× | unaudited | Review UI code for Web Interface Guidelines compliance. Use when asked to "review my UI", "check accessibility |
+| [codebase-design](https://www.skills.sh/mattpocock/skills/codebase-design) | 895,457 | 1.04× | clean | Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interfac |
 
 ## devops-cloud
 
@@ -72,9 +67,9 @@ Install counts measure adoption, not quality or safety. Read the source before i
 |---|---:|---:|---|---|
 | [grill-with-docs](https://www.skills.sh/mattpocock/skills/grill-with-docs) | 1,264,692 | 0.94× | clean | A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go. |
 | [domain-modeling](https://www.skills.sh/mattpocock/skills/domain-modeling) | 919,836 | 1.02× | clean | Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a GLO |
-| [lark-slides](https://www.skills.sh/open.feishu.cn/lark-slides) | 837,524 | 0.81× | unaudited | — |
-| [research](https://www.skills.sh/mattpocock/skills/research) | 750,974 | 0.95× | unaudited | Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the r |
 | [paper-context-resolver](https://www.skills.sh/lllllllama/rigorpilot-skills/paper-context-resolver) | 485,006 | 10.0× | unaudited | Rigor Paper Context helper for README-first deep learning repo reproduction. Use only when the README and repo |
+| [slideshow](https://www.skills.sh/heygen-com/hyperframes/slideshow) | 460,378 | 1.99× | unaudited | Build a HyperFrames slideshow to present live - slides, fragment reveals, branching hotspots and presenter mod |
+| [writing-for-agents](https://www.skills.sh/mattpocock/skills/writing-for-agents) | 504,228 | 0.97× | unaudited | Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md. |
 
 ## frontend
 
@@ -84,27 +79,25 @@ Install counts measure adoption, not quality or safety. Read the source before i
 | [vercel-react-best-practices](https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices) ★ | 861,110 | 1.3× | clean | React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when  |
 | [design-taste-frontend](https://www.skills.sh/leonxlnx/taste-skill/design-taste-frontend) | 715,989 | 1.44× | unaudited | tasteskill v2, the anti-slop frontend skill. Art direction for websites, distilled from a study of 247 curated |
 | [setup-ts-deep-modules](https://www.skills.sh/mattpocock/skills/setup-ts-deep-modules) | 2,298 | 1.0× | unaudited | Wire dependency-cruiser into a TypeScript repo so each package is a deep module, with implementation hidden in |
-| [ask-sonner](https://www.skills.sh/emilkowalski/skills/ask-sonner) | 2,030 | 1.0× | unaudited | Guide to Sonner, the React toast library — install and wire up the Toaster, pick the right toast() call, promi |
+| [vercel-composition-patterns](https://www.skills.sh/vercel-labs/agent-skills/vercel-composition-patterns) ★ | 1,756 | 1.0× | unaudited | React composition patterns that scale. Use when refactoring components with boolean prop proliferation, buildi |
 
 ## marketing-seo
 
 | Skill | Installs | Trend | Audit | What it does |
 |---|---:|---:|---|---|
-| [reddit-automation](https://www.skills.sh/flowkit-labs/skills/reddit-automation) | 1,201,771 | 0.95× | clean | Find Reddit threads where people are genuinely asking for what you offer, then draft short, genuinely helpful  |
-| [twitter-automation](https://www.skills.sh/skills-shell/superpowers/twitter-automation) | 574,004 | 2.09× | unaudited | Automate Twitter/X with posting, engagement, and user management via inference.sh CLI. Apps: x/post-tweet, x/p |
 | [lark-mail](https://www.skills.sh/larksuite/cli/lark-mail) | 473,061 | 0.66× | unaudited | 飞书邮箱：Use when user mentions 起草邮件、写邮件、草稿、发送/回复/转发邮件、查阅邮件、看邮件、搜索邮件、邮件文件夹、邮件标签、邮件联系人、监听新邮件、邮件收信规则等；use for mail/e |
-| [dbs-resonate](https://www.skills.sh/dontbesilent2025/dbskill/dbs-resonate) | 7 | 1.0× | unaudited | 诊断已经写成的稿件哪里没有打中目标受众，结合原句解释共鸣断点并提出具体删改建议。适用于稿件修订；不负责整体流量与商业价值评估，也不以解释已发布内容的传播机制为主要交付。 |
-| [dbs-spread](https://www.skills.sh/dontbesilent2025/dbskill/dbs-spread) | 7 | 1.0× | unaudited | 解释一段已有内容为什么引发共鸣、情绪或分享，识别传播机制、有效立场和受众动机，并提炼讨论方向。适用于传播机制解读；不负责整篇逐句改稿或整体流量和商业价值评估。 |
+| [stack-diagram](https://www.skills.sh/caru-ini/stack-diagram/stack-diagram) | 5 | 1.0× | unaudited | Create cloud-architecture-style diagrams of tech stacks, system architectures, infra layouts, and service topo |
+| [wecomcli-email](https://www.skills.sh/wecomteam/wecom-cli/wecomcli-email) | 5 | 1.0× | unaudited | 企业微信邮件：发送/回复/转发邮件、搜索邮件列表、获取邮件详情（正文、附件、内嵌图片解析），支持通过邮件发送日程邀约和会议预定。当用户涉及内部邮件收发、邮件查询、邮件管理等需求时使用。注意：日程和会议有单独的技能，仅当用 |
 
 ## media-creative
 
 | Skill | Installs | Trend | Audit | What it does |
 |---|---:|---:|---|---|
-| [hyperframes-cli](https://www.skills.sh/heygen-com/hyperframes/hyperframes-cli) | 1,371,474 | 2.27× | clean | The HyperFrames CLI by job - scaffold, check, look at frames, edit the timeline, preview, render locally or in |
 | [hyperframes](https://www.skills.sh/heygen-com/hyperframes/hyperframes) | 1,333,260 | 2.44× | clean | Read first to make, edit, animate or render any video with HyperFrames (HTML rendered to video), including lau |
 | [media-use](https://www.skills.sh/heygen-com/hyperframes/media-use) | 1,242,836 | 2.3× | clean | Get or make any media for a HyperFrames video - music, sound effects, images, icons, logos, voiceover, avatar  |
 | [hyperframes-creative](https://www.skills.sh/heygen-com/hyperframes/hyperframes-creative) | 916,818 | 1.88× | clean | Non-animation creative direction for HyperFrames videos. Use for design spec (frame.md / design.md) handling,  |
 | [remotion-best-practices](https://www.skills.sh/remotion-dev/skills/remotion-best-practices) ★ | 727,896 | 2.98× | unaudited | Router for all Remotion skills |
+| [ai-image-generation](https://www.skills.sh/magentosh/superpowers/ai-image-generation) | 818,815 | 4.3× | unaudited | Generate AI images with GPT-Image-2, FLUX, Gemini, Grok, Seedream, Reve and 50+ models via inference.sh CLI. M |
 
 ## mobile
 
@@ -119,11 +112,11 @@ Install counts measure adoption, not quality or safety. Read the source before i
 
 | Skill | Installs | Trend | Audit | What it does |
 |---|---:|---:|---|---|
+| [hyperframes-cli](https://www.skills.sh/heygen-com/hyperframes/hyperframes-cli) | 1,371,474 | 2.27× | clean | The HyperFrames CLI by job - scaffold, check, look at frames, edit the timeline, preview, render locally or in |
+| [reddit-automation](https://www.skills.sh/flowkit-labs/skills/reddit-automation) | 1,201,771 | 0.95× | clean | Find Reddit threads where people are genuinely asking for what you offer, then draft short, genuinely helpful  |
 | [twitter-automation](https://www.skills.sh/magentosh/superpowers/twitter-automation) | 818,159 | 4.3× | unaudited | Automate Twitter/X with posting, engagement, and user management via inference.sh CLI. Apps: x/post-tweet, x/p |
 | [twitter-automation](https://www.skills.sh/101-skills/superpowers/twitter-automation) | 927,214 | 0.64× | clean | Automate Twitter/X with posting, engagement, and user management via inference.sh CLI. Apps: x/post-tweet, x/p |
-| [lark-shared](https://www.skills.sh/open.feishu.cn/lark-shared) | 839,889 | 0.82× | unaudited | — |
-| [lark-doc](https://www.skills.sh/open.feishu.cn/lark-doc) | 840,795 | 0.81× | unaudited | — |
-| [lark-base](https://www.skills.sh/open.feishu.cn/lark-base) | 840,115 | 0.81× | unaudited | — |
+| [hyperframes-keyframes](https://www.skills.sh/heygen-com/hyperframes/hyperframes-keyframes) | 754,500 | 1.87× | unaudited | Use when a HyperFrames composition needs a punch-in, punch-out, zoom, reframe, Ken Burns treatment, camera mov |
 
 ## planning-workflow
 
@@ -139,7 +132,7 @@ Install counts measure adoption, not quality or safety. Read the source before i
 
 | Skill | Installs | Trend | Audit | What it does |
 |---|---:|---:|---|---|
-| [security-audit](https://www.skills.sh/cloudflare/security-audit-skill/security-audit) ★ | 61 | 1.0× | unaudited | Security guidance and vulnerability review for codebases, APIs, services, CLI tools, libraries, and daemons. U |
+| [security-audit](https://www.skills.sh/cloudflare/security-audit-skill/security-audit) ★ | 1,909 | 1.0× | unaudited | Security guidance and vulnerability review for codebases, APIs, services, CLI tools, libraries, and daemons. U |
 
 ## testing
 

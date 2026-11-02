@@ -36,6 +36,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 import time
@@ -135,6 +136,27 @@ def arrays_after(text: str, key: str) -> Iterable[list]:
         pos = end
 
 
+# Registry data is untrusted: it ends up in a printed install command and in text the router
+# injects into the model's context. Identifiers must be plain; descriptions are flattened.
+SOURCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
+SKILL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
+_CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2064]")
+
+
+def safe_ids(source: object, skill: object) -> bool:
+    return (isinstance(source, str) and isinstance(skill, str)
+            and bool(SOURCE_RE.match(source)) and bool(SKILL_RE.match(skill)))
+
+
+def clean_text(s: object, limit: int = 300) -> str:
+    """One line, no control or invisible characters, bounded."""
+    return re.sub(r"\s+", " ", _CTRL.sub(" ", s if isinstance(s, str) else "")).strip()[:limit]
+
+
+def install_command(source: str, skill: str) -> str:
+    return f"npx skills add {shlex.quote(source)} --skill {shlex.quote(skill)}"
+
+
 def board_rows(html: str) -> list[dict]:
     """Rows with source + skillId from a leaderboard page, de-duplicated, in page order."""
     text = rsc_text(html)
@@ -142,7 +164,7 @@ def board_rows(html: str) -> list[dict]:
     for key in ("initialSkills", "initialRows"):
         for arr in arrays_after(text, key):
             for row in arr:
-                if isinstance(row, dict) and row.get("source") and row.get("skillId"):
+                if isinstance(row, dict) and safe_ids(row.get("source"), row.get("skillId")):
                     seen.setdefault(f"{row['source']}/{row['skillId']}", row)
     return list(seen.values())
 
@@ -248,8 +270,8 @@ def description_for(sid: str, fetcher: Callable[[str], str], offline: bool, now:
     try:
         cached = json.loads(path.read_text(encoding="utf-8"))
         if offline or now - cached.get("at", 0) < DESC_TTL_S:
-            return str(cached.get("description") or "")
-    except (OSError, ValueError):
+            return clean_text(cached.get("description"))
+    except (OSError, ValueError, AttributeError):
         cached = None
     if offline:
         return ""
@@ -258,7 +280,7 @@ def description_for(sid: str, fetcher: Callable[[str], str], offline: bool, now:
     except FetchError:
         return str(cached.get("description") or "") if cached else ""
     m = re.search(r'<meta name="description" content="([^"]*)"', html)
-    desc = _unescape(m.group(1)) if m else ""
+    desc = clean_text(_unescape(m.group(1))) if m else ""
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"at": now, "description": desc}), encoding="utf-8")
@@ -421,7 +443,7 @@ def build(fetcher: Callable[[str], str] = fetch, *, offline: bool = False, max_p
             "source": "online:skills.sh",
             "source_url": f"https://www.{HOST}/{sid}",
             "installed": False,
-            "install_command": f"npx skills add {c['source']} --skill {c['skill']}",
+            "install_command": install_command(c["source"], c["skill"]),
             "author": c["source"],
             "installs": c["installs"],
             "trend": c["trend"],

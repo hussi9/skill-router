@@ -2323,8 +2323,17 @@ def _online_skill_index() -> Optional[list[tuple[dict, frozenset[str]]]]:
             if (entry.get("source") == "online:skills.sh" and entry.get("audit") != "clean"
                     and os.environ.get("SKILL_ROUTER_REQUIRE_CLEAN") == "1"):
                 continue
-            if entry.get("source") == "online:skills.sh" and not entry.get("description"):
-                continue
+            if entry.get("source") == "online:skills.sh":
+                # Re-validate on load: the cache file is data, not code, and its strings reach the model.
+                try:
+                    import skills_sh_catalog as _sh  # type: ignore[import-not-found]
+                except ImportError:
+                    continue
+                if not entry.get("description") or not _sh.safe_ids(entry.get("author"), entry.get("name")):
+                    continue
+                entry = dict(entry)
+                entry["description"] = _sh.clean_text(entry["description"])
+                entry["install_command"] = _sh.install_command(entry["author"], entry["name"])
             name = entry.get("name")
             if not name or name in local_names:
                 continue
