@@ -30,7 +30,20 @@ _ENV = {
     "SKILL_ROUTER_NO_ENRICH_CALLS": "1",
     "SKILL_ROUTER_SESSION_DIR": str(_STATE / "session"),
 }
+# Synthetic population used when the live install is off limits: a few kinds
+# (domain, process, design) so the index and matcher have something to rank.
+_FIXTURE_SKILLS = [
+    ("mac-doctor", "domain", "Use when a Mac restarts, panics or runs hot: diagnose kernel panics and boot services"),
+    ("cost-ledger", "domain", "Use when researching AI cost competitors or the cost-ledger pricing notes"),
+    ("design-review", "design", "Use when reviewing the design of application screens, cards and layout"),
+    ("systematic-debugging", "process", "Use when encountering any bug, test failure or unexpected behavior"),
+    ("test-driven-development", "process", "Use when implementing a feature or bugfix, write the failing test first"),
+    ("writing-plans", "process", "Use when you have a spec for a multi-step task before touching code"),
+    ("seo-audit", "domain", "Use when auditing a website for technical SEO, crawlability and indexing"),
+    ("stripe-integration", "domain", "Use when adding Stripe payments, webhooks and checkout"),
+]
 _SAVED: dict[str, str | None] = {}
+_SAVED_BI: dict[str, object] = {}
 
 import build_index  # type: ignore[import-not-found]
 import index_match  # type: ignore[import-not-found]
@@ -42,7 +55,10 @@ INDEX = _STATE / "skill_index.json"
 # superpowers, the personal project routes). On a machine without it they would
 # measure the install, not the router, so they skip rather than fail. Hermetic
 # fixtures for them are the next testing task; see CONTRIBUTING.md.
-REFERENCE_INSTALL = (router.valid_skill("mac-doctor")
+# Reading the install at all requires SKILL_ROUTER_CHECK_LIVE=1 (the suite's
+# live-data guard blocks the developer's ~/.claude otherwise).
+REFERENCE_INSTALL = (os.environ.get("SKILL_ROUTER_CHECK_LIVE") == "1"
+                     and router.valid_skill("mac-doctor")
                      and router.valid_skill("superpowers:systematic-debugging")
                      and (ROOT / "SKILL.personal.md").exists())
 needs_reference_install = unittest.skipUnless(
@@ -51,6 +67,14 @@ _REAL_INDEX_FILE = index_match.INDEX_FILE
 
 
 def setUpModule() -> None:
+    try:
+        _setup_module()
+    except BaseException:
+        tearDownModule()
+        raise
+
+
+def _setup_module() -> None:
     # Environment is set here, not at import: pytest imports every test
     # module before running any, so import-time env edits leak across files
     # (test_router.py pins the v3 table; this file needs the v4 index).
@@ -58,7 +82,23 @@ def setUpModule() -> None:
         _SAVED[k] = os.environ.get(k)
         os.environ[k] = v
     _SAVED["SKILL_ROUTER_NO_INDEX"] = os.environ.pop("SKILL_ROUTER_NO_INDEX", None)
-    build_index.build_and_write(INDEX)
+    if os.environ.get("SKILL_ROUTER_CHECK_LIVE") == "1":
+        build_index.build_and_write(INDEX)
+    else:
+        # Hermetic: an empty catalog and no personal/memory files, never the live install.
+        for attr, val in (("PERSONAL", _STATE / "no-SKILL.personal.md"),
+                          ("MEMORY_INDEX", _STATE / "no-MEMORY.md"),
+                          ("CACHE_DIR", _STATE / "enrich-cache")):
+            _SAVED_BI[attr] = getattr(build_index, attr)
+            setattr(build_index, attr, val)
+        fixture = _STATE / "fixture-catalog.json"
+        entries = [{"name": n, "kind": k, "owner": "user", "invokable": True, "description": d}
+                   for n, k, d in _FIXTURE_SKILLS]
+        fixture.write_text(json.dumps({"version": 2, "total": len(entries),
+                                       "entries": entries, "agents": []}))
+        data = build_index.build(catalog_path=fixture)
+        assert data["entries"], "fixture catalog produced an empty index"
+        INDEX.write_text(json.dumps(data), encoding="utf-8")
     index_match.INDEX_FILE = INDEX
     index_match.load_index.cache_clear()
     router.PENDING = _STATE / "pending.json"
@@ -75,6 +115,8 @@ def setUpModule() -> None:
 
 
 def tearDownModule() -> None:
+    for attr, val in _SAVED_BI.items():
+        setattr(build_index, attr, val)
     for k, v in _SAVED.items():
         if v is None:
             os.environ.pop(k, None)
@@ -104,8 +146,8 @@ class TestRouteCard(unittest.TestCase):
         self.assertIn("Memory:", text)
 
     def test_index_route_on_operate_is_soft(self) -> None:
-        path, chain, _, text = router.route("research competitors for theaibill")
-        self.assertEqual(chain[0].skill, "theaibill")
+        path, chain, _, text = router.route("research competitors for cost-ledger")
+        self.assertEqual(chain[0].skill, "cost-ledger")
         self.assertIn("Soft route", text)
         self.assertNotIn("IRON RULE", text)
         self.assertEqual(router.LAST_CARD.tier, "soft")
@@ -222,9 +264,9 @@ class TestSubagentHandoff(unittest.TestCase):
         sd = _STATE / "session"
         sd.mkdir(parents=True, exist_ok=True)
         (sd / "sess-x.json").write_text(json.dumps({
-            "session_id": "sess-x", "path": "OPERATE", "skills": ["theaibill"],
-            "primary": "theaibill", "tier": "soft", "gates": ["scripts/check.sh green"],
-            "memory": ["theaibill-practice"]}))
+            "session_id": "sess-x", "path": "OPERATE", "skills": ["cost-ledger"],
+            "primary": "cost-ledger", "tier": "soft", "gates": ["scripts/check.sh green"],
+            "memory": ["cost-ledger-notes"]}))
 
     def test_task_hook_appends_route_to_prompt(self) -> None:
         out = run_hook("task_brief.py", {"session_id": "sess-x", "tool_name": "Task",
@@ -232,7 +274,7 @@ class TestSubagentHandoff(unittest.TestCase):
                                                         "subagent_type": "general-purpose"}})
         payload = json.loads(out)["hookSpecificOutput"]
         self.assertEqual(payload["permissionDecision"], "allow")
-        self.assertIn('Skill(skill="theaibill")', payload["updatedInput"]["prompt"])
+        self.assertIn('Skill(skill="cost-ledger")', payload["updatedInput"]["prompt"])
         self.assertIn("Completion gates", payload["updatedInput"]["prompt"])
         self.assertTrue(payload["updatedInput"]["prompt"].startswith("audit the pricing page"))
 
@@ -257,7 +299,7 @@ class TestSubagentHandoff(unittest.TestCase):
     def test_subagent_brief_carries_parent_route(self) -> None:
         out = run_hook("subagent_brief.py", {"agent_type": "general-purpose", "session_id": "sess-x"},
                        env={"SKILL_ROUTER_NO_LOG": "1"})
-        self.assertIn("theaibill", json.loads(out)["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("cost-ledger", json.loads(out)["hookSpecificOutput"]["additionalContext"])
 
 
 @needs_reference_install
@@ -349,7 +391,7 @@ class TestJevRoute(unittest.TestCase):
                                       "tool_input": {"skill": "mac-doctor"}},
                  env={"SKILL_ROUTER_NO_LEARN": "1", "SKILL_ROUTER_NO_LOG": "1"})
         run_hook("skill_invoked.py", {"session_id": sid, "agent_id": "sub-1", "tool_name": "Skill",
-                                      "tool_input": {"skill": "theaibill"}},
+                                      "tool_input": {"skill": "cost-ledger"}},
                  env={"SKILL_ROUTER_NO_LEARN": "1", "SKILL_ROUTER_NO_LOG": "1"})
         self.assertEqual(router.loaded_this_session({"session_id": sid}), frozenset({"mac-doctor"}))
         self.assertEqual(router.loaded_this_session({}), frozenset())
@@ -636,12 +678,12 @@ class TestDispatchModel(unittest.TestCase):
         sd = _STATE / "session"
         sd.mkdir(parents=True, exist_ok=True)
         (sd / "sess-m.json").write_text(json.dumps({
-            "session_id": "sess-m", "path": "OPERATE", "skills": ["theaibill"],
-            "primary": "theaibill", "tier": "soft", "gates": [], "memory": []}))
+            "session_id": "sess-m", "path": "OPERATE", "skills": ["cost-ledger"],
+            "primary": "cost-ledger", "tier": "soft", "gates": [], "memory": []}))
         self.fake("light", 0.9)
         upd = self.run_main({"session_id": "sess-m", "tool_input": {"prompt": "list the pricing tiers"}})
         self.assertEqual(upd["model"], "haiku")
-        self.assertIn('Skill(skill="theaibill")', upd["prompt"])
+        self.assertIn('Skill(skill="cost-ledger")', upd["prompt"])
 
 
 class TestPreviousAssistantTail(unittest.TestCase):

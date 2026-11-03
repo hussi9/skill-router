@@ -55,4 +55,4 @@ Most tests are hermetic. A few classes (`TestRouteCard`, `TestJevRoute`, `TestTi
 `TestWorkTierAndQuota`, `TestPendingAndSession`) route real prompts against an index built from the live skill
 catalog and skip themselves when the skills they name (`mac-doctor`, `superpowers:*`) and a `SKILL.personal.md`
 are absent. `SKILL_ROUTER_CHECK_LIVE=1` additionally audits your installed agents. Making these fixture-driven is
-the most useful testing contribution.
+the most useful testing contribution. `bash scripts/check.sh --live` runs the unit tests with `SKILL_ROUTER_CHECK_LIVE=1` so these live-only tests execute.

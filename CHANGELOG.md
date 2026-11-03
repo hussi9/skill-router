@@ -1,5 +1,70 @@
 # Changelog
 
+## v2.1.0 (public) — 2026-11-02
+
+### Wave 3: MCP server
+
+- **`mcp/server.py`**: a stdlib stdio MCP server with read-only tools `route`, `find_skill`, `audit_skills`
+  and `listing`. It runs the router outside hook mode and uses Jev only when a key is available. See `mcp/README.md`.
+
+### Wave 4: per-project skill visibility
+
+- **`visibility plan|apply|undo`**: a per-project plan that sets unused user skills `name-only` through
+  `skillOverrides` so the project's used skills keep their descriptions. Dry run by default; `apply`
+  writes only the project's `settings.local.json` with a backup and `undo`. Plugin changes and the
+  budget fraction are suggestions only.
+- **Measured**: the 80% bar was not met (names count: 0 of 3 projects; names free: 1 of 3 passes the gate,
+  needing 93 overrides; a second needs 217 and fails it; sub-agent usage included), so it ships as a dry-run planner. See `docs/visibility.md`.
+- **Doctor line**: an advisory `skill visibility` line read from the cache `plan` writes; it never
+  scans transcripts and never fails.
+
+### Wave 2: skill doctor
+
+- **`skill audit`** (`python3 scripts/cli.py audit [--format text|md|html] [--out FILE] [--no-jev]`): listing
+  tokens, unused skills, shown-but-never-loaded, overlaps (keyword, or Jev when a key is set), name-match flags
+  and a 0-100 score. Read-only; it recommends and never changes a skill. See `docs/skill-audit.md`.
+- **Doctor line**: `scripts/doctor.py` prints one advisory `skill audit` line (keyless, never a failure).
+
+### Wave 1.x: follow-ups
+
+- **Hygiene gate**: `scripts/hygiene.py` runs as a `check.sh` step and scans tracked files against a
+  git-ignored pattern file for personal identifiers and real prompts.
+- **Doctor live-install drift**: doctor compares the scripts the installed hooks run (and the modules they
+  import) with the repo and prints a non-destructive rsync preview and apply line (no `--delete`).
+- **Doctor gate mode** (`--gate` or `SKILL_ROUTER_DOCTOR_GATE=1`): machine-state checks (live drift, pinned
+  sub-agents, agent registration) print `[warn]` and do not fail; `check.sh` Health uses it. Plain
+  `doctor.py` still fails on them.
+- **Opt-in payload shape capture**: records the keys and value types of hook payloads, never the values.
+- **Bash hook shell pre-filter**: non-test commands skip the Python path, 74.1 to 5.3 ms per command.
+- **Holdout and quiet window**: the holdout keeps warning lines, and the quiet window ages on suppressed
+  repeats.
+
+### Jev top three / keyless layers
+
+- **Jev's top three below the bar** (`Choice.ranked`, `router.jev_shortlist_line`): Jev already returns a
+  probability for every skill; when its best pick is under 0.8 the router names its three most likely skills for
+  Claude to choose. In-sample with the work gate, the right skill reaches Claude on 10/27 hard tasks (was 2) and
+  38/74 everyday ones (was 11); 0 of 6 chat controls got a line. Lines stay within 200 characters (~185 typical).
+  On by default; `SKILL_ROUTER_JEV_SHORTLIST=0` turns it off. Jev cache version 3.
+- **Keyless:** typo correction (on), a keyword + local-semantic shortlist (off by default, below the bar), and a
+  `rank_skills` op on the embedding daemon. Full numbers: `docs/no-key-routing.md`.
+- **Work gate**: extra lines appear only on work turns (`index_match.work_signal`); 0 of 6 chat controls got one
+  in the eval.
+
+### Wave 1: outcomes and measurement
+
+Self-measurement; not yet released.
+
+- **Outcomes log** (`scripts/outcomes.py`): records which skills were shown, loaded, followed by green or red tests
+  or corrected. Names and hashes only. See `docs/outcomes.md`.
+- **Holdout**: `SKILL_ROUTER_HOLDOUT` (default 10 %) silences the router on a deterministic slice of turns so lift
+  can be measured. Turns without a prompt id are never held out.
+- **Distillation dataset** (`scripts/jev_dataset.py`): Jev decisions kept as training rows
+  (`SKILL_ROUTER_FEATURES_FILE`) for a local chooser.
+- **`skill-router stats`** (`python3 scripts/cli.py stats [--days N]`): follow rate by mode, holdout lift with n
+  (a turn is known with any test result or a correction), tokens injected per shown line.
+- **Stop-hook skip-line fix.**
+
 ## v2.0.3 (public) — 2026-11-02
 
 - Identifier checks use `fullmatch` (a trailing newline no longer passes `$`).

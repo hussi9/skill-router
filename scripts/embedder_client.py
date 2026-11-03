@@ -105,3 +105,26 @@ if __name__ == "__main__":
         sys.exit(1)
     result = classify(text)
     print(json.dumps(result or {"path": "SKIP", "reason": "client_failed"}, indent=2))
+
+
+def rank_skills(prompt: str, k: int = 50, timeout: float = 0.15) -> Optional[list]:
+    """Skill names by semantic similarity, best first; None when the daemon is absent,
+    still warming up, or slower than `timeout`. Callers fall back to keyword retrieval."""
+    if not prompt or not SOCKET_PATH.is_socket():
+        return None
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect(str(SOCKET_PATH))
+            sock.sendall((json.dumps({"op": "rank_skills", "prompt": prompt, "k": k}) + "\n").encode("utf-8"))
+            buf = b""
+            while b"\n" not in buf:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+        resp = json.loads(buf.decode("utf-8", errors="replace").splitlines()[0]) if buf else {}
+    except (OSError, ValueError, IndexError):
+        return None
+    names = resp.get("names") if isinstance(resp, dict) else None
+    return [n for n in names if isinstance(n, str)] if names else None

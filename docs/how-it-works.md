@@ -90,6 +90,14 @@ follow rates, keyword→skill triggers, handovers, chains, online candidates, pl
 `soft_skips` per skill and `unused_90d` — user skills with no invocation in 90 days,
 the next archive pass.
 
+## Holdout
+
+`SKILL_ROUTER_HOLDOUT` (default `0.10`, `0` disables) silences a deterministic random
+tenth of soft-routed turns in hook mode: `sha256(session_id + prompt_id)` decides, nothing
+is printed, no pending state is written, and the outcomes log records the would-be line with
+`held_out: true`. Hard routes (BROKEN, gated project routes) are never held out. Held-out
+turns are counted separately in `outcomes.summarize()` so lift can be compared honestly.
+
 ## Health
 
 ```bash

@@ -15,6 +15,7 @@ Five jobs, in order, each independently fail-soft:
   1. Append to ~/.claude/skill_usage.log      (statusline + legacy reports)
   2. Append an `invoke` event with session_id + prompt_id to the router log
                                               (the learner's join key)
+  2b. Append a `loaded` signal to the outcomes ledger (outcomes.py)
   3. Remove the skill from pending state      (satisfies the IRON RULE)
   4. Clear its strike and override tallies    (re-arm the skill)
   5. Emit the handover nudge, if history has one:
@@ -117,6 +118,25 @@ def record_loaded(skill: str, payload: dict) -> None:
         pass
 
 
+def record_outcome(skill: str, payload: dict) -> None:
+    """`loaded` signal for the outcomes ledger: was a shown line followed?
+
+    Attributed to the payload's prompt_id, else the session's latest turn.
+    Sub-agent loads are skipped: they are not the parent following a line.
+    """
+    sid = str(payload.get("session_id") or "").strip()
+    if not sid or payload.get("agent_id"):
+        return
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import outcomes  # type: ignore[import-not-found]
+        pid = str(payload.get("prompt_id") or "") or outcomes.latest_prompt_id(sid)
+        if pid:
+            outcomes.record_signal(sid, pid, "loaded", skill, project=outcomes.project_of(payload))
+    except Exception:
+        pass
+
+
 def log_usage(skill: str) -> None:
     try:
         USAGE_LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -173,6 +193,7 @@ def main() -> int:
     log_usage(skill)
     log_invoke_event(skill, payload)
     record_loaded(skill, payload)
+    record_outcome(skill, payload)
     if not payload.get("agent_id"):
         satisfy_pending(skill, str(payload.get("session_id") or ""))
     rearm(skill)

@@ -55,6 +55,34 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "_skill_router": true,
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "_skill_router": true,
+            "_purpose": "Record tests_green / tests_red when a test command finishes, so shown skill lines can be scored by what happened next.",
+            "type": "command",
+            "command": "in=$(cat); case \"$in\" in *pytest*|*vitest*|*jest*|*\"npm test\"*|*\"go test\"*|*\"cargo test\"*) printf '%s' \"$in\" | python3 $HOME/.claude/skills/skill-router/scripts/outcomes.py --post-bash ;; esac",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "_skill_router": true,
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "_skill_router": true,
+            "_purpose": "Record tests_red when a test command fails.",
+            "type": "command",
+            "command": "in=$(cat); case \"$in\" in *pytest*|*vitest*|*jest*|*\"npm test\"*|*\"go test\"*|*\"cargo test\"*) printf '%s' \"$in\" | python3 $HOME/.claude/skills/skill-router/scripts/outcomes.py --post-bash-failure ;; esac",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [

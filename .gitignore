@@ -41,3 +41,10 @@ docs/*-plan.md
 docs/jev-scope-2026-10-22/run-1/
 docs/jev-scope-2026-10-22/*-preflight.json
 SKILL.personal.md
+
+# Personal identifier regexes for scripts/hygiene.py (one per line); never commit.
+.hygiene-patterns
+
+# Local calibration labels (real skill names)
+skill_router_cache/
+overlap-labels.jsonl

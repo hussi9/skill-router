@@ -324,6 +324,67 @@ class State:
         self.model = None
         self.corpus: list[CorpusEntry] = []
         self.lock = threading.Lock()
+        # Skill retrieval for the keyless shortlist: one vector per routable skill.
+        self.skill_names: list[str] = []
+        self.skill_matrix = None
+        self.skill_index_mtime = 0.0
+        self.skill_building = False
+
+
+SKILL_INDEX = Path.home() / ".claude" / "skill_index.json"
+_SKILL_SKIP_TYPES = ("builtin", "plugin-command", "command", "agent")
+
+
+def _skill_doc(e: dict) -> str:
+    use = "; ".join((e.get("use_when") or [])[:3])
+    return f"{e['name'].replace('-', ' ')}: {e.get('routing_summary') or e.get('description', '')} {use}"[:600]
+
+
+def build_skill_vectors(state: "State") -> None:
+    """Embed every routable skill once (~8 s for ~400). Runs off the request path;
+    until it finishes, rank_skills answers "not_ready" and the router uses keywords."""
+    try:
+        mtime = SKILL_INDEX.stat().st_mtime
+        entries = json.loads(SKILL_INDEX.read_text(encoding="utf-8")).get("entries") or []
+        docs = [e for e in entries if e.get("name") and e.get("type") not in _SKILL_SKIP_TYPES
+                and e.get("kind") not in ("process", "meta") and e["name"] != "skill-router"]
+        t0 = time.perf_counter()
+        mat = np.array(list(state.model.embed([_skill_doc(e) for e in docs])), dtype=np.float32)
+        mat /= np.linalg.norm(mat, axis=1, keepdims=True) + 1e-9
+        with state.lock:
+            state.skill_names = [e["name"] for e in docs]
+            state.skill_matrix = mat
+            state.skill_index_mtime = mtime
+        log(f"skill vectors built ({len(docs)} skills) in {round((time.perf_counter() - t0) * 1000)}ms")
+    except Exception as e:  # noqa: BLE001
+        log(f"skill vectors failed: {e}")
+    finally:
+        state.skill_building = False
+
+
+def _maybe_rebuild_skills(state: "State") -> None:
+    try:
+        mtime = SKILL_INDEX.stat().st_mtime
+    except OSError:
+        return
+    if mtime != state.skill_index_mtime and not state.skill_building:
+        state.skill_building = True
+        threading.Thread(target=build_skill_vectors, args=(state,), daemon=True).start()
+
+
+def rank_skills(state: "State", prompt: str, k: int) -> dict:
+    _maybe_rebuild_skills(state)
+    with state.lock:
+        names, mat = state.skill_names, state.skill_matrix
+    if mat is None or not names:
+        return {"names": [], "reason": "not_ready"}
+    t0 = time.perf_counter()
+    q = np.array(list(state.model.query_embed([prompt]))[0], dtype=np.float32)
+    q /= np.linalg.norm(q) + 1e-9
+    sims = mat @ q
+    top = np.argsort(-sims)[:max(1, min(k, 100))]
+    return {"names": [names[i] for i in top], "sims": [round(float(sims[i]), 4) for i in top],
+            "_ms": round((time.perf_counter() - t0) * 1000, 1)}
 
 
 def handle_client(conn: socket.socket, state: State) -> None:
@@ -369,6 +430,16 @@ def handle_client(conn: socket.socket, state: State) -> None:
                             qvec = list(state.model.embed([prompt]))[0]
                             resp = classify(qvec, state.corpus)
                             resp["_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            elif op == "rank_skills":
+                prompt = str(req.get("prompt", "")).strip()[:4000]
+                if not prompt or state.model is None:
+                    resp = {"names": [], "reason": "empty_prompt" if not prompt else "model_not_loaded"}
+                else:
+                    try:
+                        k = int(req.get("k", 50))
+                    except (TypeError, ValueError):
+                        k = 50
+                    resp = rank_skills(state, prompt, k)
             elif op == "shutdown":
                 resp = {"ok": True}
                 conn.sendall((json.dumps(resp) + "\n").encode())
@@ -415,6 +486,8 @@ def serve() -> None:
         f"{len(calibration_raw)} calibration + {len(catalog_raw)} catalog, "
         f"deduped to {len(raw)}) in {round((time.perf_counter() - t0) * 1000)}ms"
     )
+
+    _maybe_rebuild_skills(state)
 
     # Bind socket
     SOCKET_PATH.parent.mkdir(parents=True, exist_ok=True)

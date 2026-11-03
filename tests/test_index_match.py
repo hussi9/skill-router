@@ -31,7 +31,7 @@ def setUpModule() -> None:
     os.environ["SKILL_ROUTER_NO_ENRICH_CALLS"] = "1"  # lexical only, no network
     catalog = _TMP / "catalog.json"
     entries = [{'name': 'brand-manager',
-      'description': "Owns Hussain's personal brand end-to-end — LinkedIn and X content strategy, "
+      'description': "Owns the owner's personal brand end-to-end — LinkedIn and X content strategy, "
                      'drafting in the locked v2 voice, scheduling, cadence, voice-drift auditing, '
                      'and quarterly positioning review. Use whenever the request touches personal '
                      'brand, LinkedIn posts, "what should I post", content planning, brand '
@@ -85,15 +85,15 @@ def setUpModule() -> None:
                      'release',
       'type': 'skill',
       'invokable': True},
-     {'name': 'theaibill',
-      'description': 'AI and cloud cost analysis grounded in The AI Cost Handbook '
-                     '(theaibill.xyz/handbook). Use when the user asks what something costs on '
+     {'name': 'cost-ledger',
+      'description': 'AI and cloud cost analysis grounded in The AI Cost Ledger '
+                     '(a cost reference). Use when the user asks what something costs on '
                      'AI/GPU/cloud, wants their bill audited, asks whether to commit/reserve/buy '
                      'hardware, or asks why an AI feature is expensive. Trigger phrases — audit '
                      'my bill, why is my AWS bill, GPU cost, H100 price, token cost, savings '
                      'plan, reserved instance, spot instances, egress cost, should we self-host, '
-                     'inference cost, cost per token, cloud cost review, theaibill, ai cost '
-                     'handbook.',
+                     'inference cost, cost per token, cloud cost review, cost-ledger, ai cost '
+                     'ledger.',
       'type': 'skill',
       'invokable': True},
      {'name': 'wseller',
@@ -108,7 +108,7 @@ def setUpModule() -> None:
      {'name': 'youtube-manager',
       'description': 'Activated when working on @Economicalai YouTube content — script writing, '
                      'research, B-roll planning, sprint roadmap, content strategy, pillar '
-                     "tagging, render workflow. Encapsulates Hussain's locked rules: 4 "
+                     "tagging, render workflow. Encapsulates the owner's locked rules: 4 "
                      'perspective pillars, Earned Vulnerability gradient, Frameworks-Invisible, '
                      'HPC framework, Original-Script-Is-The-Asset, 60-90s depth default, '
                      'Runway-as-default pipeline. Use BEFORE any video work — scripts, research, '
@@ -154,7 +154,7 @@ PROBES = [
     ("tailor my resume for this stripe job posting", "jobhunt-agent", None),
     ("find a good deal on a used m2 macbook air", "dealscout", None),
     ("draft outreach emails to cosmetic dentists in toronto", "wseller", None),
-    ("research competitors for theaibill", "theaibill", None),
+    ("research competitors for cost-ledger", "cost-ledger", None),
     ("the vitest suite fails after upgrading vite", None, "BROKEN"),
     ("the DeenUnlock app crashes on launch in the release build", None, "BROKEN"),
 ]

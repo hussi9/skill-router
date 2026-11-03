@@ -1675,6 +1675,8 @@ def _llm_decide(prompt: str, res) -> Optional[dict]:
 
 PREV_ASSISTANT = ""                 # tail of the previous assistant turn; main() sets it
 JEV_TIMED_OUT = False               # this prompt already spent its network budget waiting
+JEV_ANSWERED = False                # Jev returned a choice this prompt (the keyless list then stays quiet)
+JEV_CHOICE = None                   # that choice (jev_choose.Choice), for the distillation features log
 TRANSCRIPT_TAIL_BYTES = 256_000
 
 
@@ -1694,13 +1696,15 @@ def _jev_decide(prompt: str):
     """jev_choose.Choice, or None — None means "use the lexical + Gemini path"."""
     if not _jev_active():
         return None
-    global JEV_TIMED_OUT
+    global JEV_TIMED_OUT, JEV_ANSWERED, JEV_CHOICE
     JEV_TIMED_OUT = False
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import jev_choose  # type: ignore[import-not-found]
         got = jev_choose.choose(prompt, context=PREV_ASSISTANT, session_id=SESSION_ID, prompt_id=PROMPT_ID)
         JEV_TIMED_OUT = got is None and jev_choose.LAST_FAILURE == "timeout"
+        JEV_ANSWERED = got is not None
+        JEV_CHOICE = got
         return got
     except Exception:
         return None
@@ -1766,6 +1770,8 @@ def _route_from_jev(prompt: str, jev, res, domains: list[str],
     Jev's QUESTION is never used to silence a turn: on real prompts that did
     invoke a skill it said QUESTION 8 times in 126.
     """
+    global JEV_ROUTED
+    JEV_ROUTED = True
     path = triage(prompt)
     if path == "SKIP" and res.path in ("BROKEN", "BUILD", "OPERATE"):
         path = res.path
@@ -1825,6 +1831,10 @@ def _route_from_jev(prompt: str, jev, res, domains: list[str],
         nudge = quota_only_line(jev, work_path)
         if nudge:
             suggestions.append(nudge)
+        shown = frozenset(m.group(1) for ln in suggestions if (m := SUGGESTION_RE.match(ln)))
+        short = jev_shortlist_line(prompt, work_path, jev, exclude=shown)
+        if short:
+            suggestions.append(short)
         return "SKIP", [], domains, "\n".join(suggestions)
     card = RouteCard(tier=_tier_for(path, gates), gates=gates, memory=memory,
                      decided_by="jev", primary_kind=primary_kind,
@@ -1853,6 +1863,8 @@ def _quota():
 
 SESSION_ID = ""                      # set by main() in hook mode
 PROMPT_ID = ""
+PROJECT: Optional[str] = None         # 12-hex key of the hook payload cwd
+JEV_ROUTED = False                   # set when this prompt's output came from the Jev path
 QUOTA_HINT_EVERY_S = 30 * 60         # one Kimi nudge per band per half hour per session
 
 
@@ -2048,6 +2060,9 @@ def _learned_fallback(prompt: str, domains: list[str]) -> tuple[str, list[Step],
 
 def route(prompt: str) -> tuple[str, list[Step], list[str], str]:
     """Return (path, chain, domains, announcement)."""
+    global JEV_ANSWERED, JEV_CHOICE
+    JEV_ANSWERED = False
+    JEV_CHOICE = None
     domains = detect_domains(prompt)
 
     # A question is a question even when it names a project: "what does the
@@ -2442,6 +2457,12 @@ def _read_input() -> tuple[str, dict]:
     return stripped, {}
 
 
+def _project_of(meta: dict) -> Optional[str]:
+    """12-hex project key from the hook payload's cwd (never the raw path)."""
+    mod = _outcomes()
+    return mod.project_of(meta) if mod is not None else None
+
+
 def log_prompt_event(prompt: str, meta: dict, path: str, chain: list[Step],
                      note: str = "") -> None:
     """Record what this prompt looked like and what was announced for it.
@@ -2474,9 +2495,391 @@ def log_prompt_event(prompt: str, meta: dict, path: str, chain: list[Step],
                 "route": chain[0].skill if chain else None,
                 "note": note or None,
                 "tokens": tokens,
+                **({"project": PROJECT} if PROJECT else {}),
             }) + "\n")
     except OSError:
         pass
+
+
+# ---- layer 4: let the session model choose (no key, no extra call) -----------
+#
+# The best chooser is already running: Claude, with the whole conversation in view.
+# When nothing routes, the router names up to three installed skills that local
+# retrieval ranks highest and lets Claude decide. Names only — the skill listing
+# Claude already has carries their descriptions — so a line costs ~30 tokens.
+# Burden rules, all enforced here:
+#   * only when no card was printed, and the turn is work, not a question or chat;
+#   * only above a retrieval floor (measured, see docs/no-key-routing.md);
+#   * never a skill already loaded this session, never the router itself;
+#   * never enforced, never asked about at Stop, never logged as a chain;
+#   * the same names are not repeated within SHORTLIST_QUIET turns of a session.
+
+SHORTLIST_K = 3
+SHORTLIST_FLOOR = float(os.environ.get("SKILL_ROUTER_SHORTLIST_FLOOR", "4.0"))
+SHORTLIST_QUIET = 5
+_NOT_SHORTLISTED_TYPES = ("builtin", "plugin-command", "command", "agent")
+
+
+def _shortlist_mode() -> str:
+    """"off" (default), "on", or "auto" (opt-in: on only when the local embedding daemon answers).
+
+    Off by default. Default-on needs >= 9/27 labeled recall with 0/6 chat false alarms AND
+    >= 40 % precision (right lines / lines shown) on both labeled and mined sets. Measured
+    in-sample (docs/no-key-routing.md): keyword + semantic is right on 10/27 at 48 % labeled
+    but 29 % mined, so the line would mostly cost tokens on everyday prompts.
+    """
+    v = os.environ.get("SKILL_ROUTER_SHORTLIST", "off").strip().lower()
+    if v in ("1", "on", "true"):
+        return "on"
+    if v == "auto":
+        return "auto"
+    return "off"
+
+
+def _shortlist_on() -> bool:
+    return _shortlist_mode() != "off"
+
+
+@functools.lru_cache(maxsize=1)
+def _entry_types() -> dict[str, str]:
+    try:
+        import index_match  # type: ignore[import-not-found]
+        raw = json.loads(Path(index_match.INDEX_FILE).read_text(encoding="utf-8"))
+        return {e["name"]: str(e.get("type") or "") for e in raw.get("entries", []) if e.get("name")}
+    except (OSError, ValueError, KeyError, ImportError, AttributeError):
+        return {}
+
+
+_SEM_CACHE: tuple = (None, None)     # (prompt, result): one daemon call per prompt
+
+
+def _semantic_order(prompt: str) -> Optional[list]:
+    """Names from the local embedding daemon, or None (absent, warming up, slow, disabled)."""
+    global _SEM_CACHE
+    if os.environ.get("SKILL_ROUTER_NO_EMBED") == "1":
+        return None
+    if _SEM_CACHE[0] == prompt:
+        return _SEM_CACHE[1]
+    try:
+        from embedder_client import rank_skills  # type: ignore[import-not-found]
+        got = rank_skills(prompt)
+    except Exception:
+        got = None
+    _SEM_CACHE = (prompt, got)
+    return got
+
+
+def _rrf(*orders: list, k: int = 10) -> list:
+    score: dict[str, float] = {}
+    for order in orders:
+        for r, n in enumerate(order):
+            score[n] = score.get(n, 0.0) + 1.0 / (k + r)
+    return sorted(score, key=lambda n: -score[n])
+
+
+def _shortlistable(name: str, types: dict, kind: str = "domain", loaded: frozenset = frozenset()) -> bool:
+    return (kind not in ("process", "meta") and name != SELF_SKILL and name not in loaded
+            and types.get(name, "") not in _NOT_SHORTLISTED_TYPES)
+
+
+def shortlist_candidates(prompt: str, loaded: frozenset = frozenset(),
+                         semantic_only: bool = False) -> list[tuple[str, float]]:
+    """(name, score) of installed domain skills worth naming, best first. Empty when unsure.
+
+    Keyword + local semantic ranks fused when the embedding daemon answers within 150 ms;
+    keywords alone (above SHORTLIST_FLOOR) otherwise, or nothing when semantic_only.
+    Measured: fused puts the right skill in the top three for 10-11 of 27 hard real tasks,
+    keywords for 6-7.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import index_match  # type: ignore[import-not-found]
+        ranked = index_match.rank(prompt, limit=50)
+    except Exception:
+        return []
+    types = _entry_types()
+
+    def ok(name: str, kind: str = "domain") -> bool:
+        return _shortlistable(name, types, kind, loaded)
+
+    lex = [(m.name, m.score) for m in ranked if ok(m.name, m.kind)]
+    sem = _semantic_order(prompt)
+    if sem:
+        known = {n for n in types if types[n] not in _NOT_SHORTLISTED_TYPES}
+        sem = [n for n in sem if ok(n) and (not known or n in known)]
+        fused = _rrf([n for n, _ in lex], sem)
+        return [(n, 0.0) for n in fused[:SHORTLIST_K]]
+    if semantic_only:
+        return []
+    out = [(n, sc) for n, sc in lex if sc >= SHORTLIST_FLOOR]
+    return out[:SHORTLIST_K]
+
+
+def shortlist_line(prompt: str, path: str, loaded: frozenset = frozenset()) -> str:
+    """The one advisory line, or "" — see the burden rules above.
+
+    A fallback for when Jev is unavailable, failed or timed out: when Jev answered this prompt
+    its own list (or its silence) stands, even if it printed nothing.
+    """
+    if JEV_ANSWERED or not _shortlist_on() or _work_signal(prompt) < WORK_AT:
+        return ""
+    names = [n for n, _ in shortlist_candidates(prompt, loaded, semantic_only=_shortlist_mode() == "auto")]
+    return _fit_line(KEYLESS_PREFIX, names)
+
+
+# Spec R2: every advisory line stays within LINE_MAX characters. Names are appended in rank
+# order only while the whole line fits; when not even one fits there is no line.
+LINE_MAX = 200
+SHORTLIST_MARKER = "[skill-router] Maybe relevant ("
+KEYLESS_PREFIX = SHORTLIST_MARKER + "unranked; load only if it clearly fits): "
+JEV_PREFIX = SHORTLIST_MARKER + "Jev, below routing bar; load only if it clearly fits): "
+
+
+def _fit_names(prefix: str, names: list[str]) -> list[str]:
+    """The leading names whose joined line (prefix + names) stays within LINE_MAX."""
+    kept: list[str] = []
+    for n in names:
+        if len(prefix + " · ".join(kept + [n])) > LINE_MAX:
+            break
+        kept.append(n)
+    return kept
+
+
+def _fit_line(prefix: str, names: list[str]) -> str:
+    kept = _fit_names(prefix, names)
+    return prefix + " · ".join(kept) if kept else ""
+
+
+# Work-turn bar for both shortlists (index_match.work_signal): requests 1.0, broken 0.8,
+# questions about a thing people build or run 0.7; concept questions, musings and chat stay
+# below. Measured in docs/no-key-routing.md (0 of 6 chat controls).
+WORK_AT = 0.6
+
+
+def _work_signal(prompt: str) -> float:
+    try:
+        import index_match  # type: ignore[import-not-found]
+        return float(index_match.work_signal(prompt))
+    except Exception:
+        return 0.0
+
+
+ROUTE_AT_JEV = 0.8
+
+
+def _jev_shortlist_on() -> bool:
+    return os.environ.get("SKILL_ROUTER_JEV_SHORTLIST", "1") not in ("0", "off", "false")
+
+
+def jev_shortlist_line(prompt: str, path: str, jev, exclude: frozenset = frozenset()) -> str:
+    """Jev's own top three by probability when its best pick is below the routing bar.
+
+    Same burden rules as the keyless shortlist (work turns only, names only, no loaded
+    skill, no router, no builtin, not repeated in a session, line within LINE_MAX).
+    It is printed only when Jev did not route, so its argmax is never also a route card;
+    names in ``exclude`` (already printed as a ``Possible fit`` line this turn) are skipped.
+    """
+    if not _jev_shortlist_on() or not getattr(jev, "ranked", ()):
+        return ""
+    # Work evidence: the local work signal (requests, broken things, questions about a thing
+    # people build) or Jev itself sure it is work. Jev's path at 0.5-0.8 is not enough:
+    # a two-word acknowledgement (OPERATE 0.68) and a terminology musing (OPERATE 0.52) were the only chat
+    # turns that got a line in the eval.
+    jev_sure = getattr(jev, "path", "") in ("BROKEN", "BUILD", "OPERATE") and getattr(jev, "path_confidence", 0.0) >= ROUTE_AT_JEV
+    if _work_signal(prompt) < WORK_AT and not jev_sure:
+        return ""
+    types = _entry_types()
+    names: list[str] = []
+    for n in jev.ranked:
+        if (n == SELF_SKILL or n in LOADED or n in exclude or types.get(n, "") in _NOT_SHORTLISTED_TYPES
+                or not valid_skill(n) or is_deferred(n)):
+            continue
+        names.append(n)
+        if len(names) == SHORTLIST_K:
+            break
+    names = _fit_names(JEV_PREFIX, names)
+    # Check only: main() records the names once the line is actually printed, so a
+    # held-out turn does not suppress the same names on later turns.
+    if not names or (SESSION_ID and _shortlist_recent(SESSION_ID, names, record=False)):
+        return ""
+    return JEV_PREFIX + " · ".join(names)
+
+
+def _shortlist_recent(session_id: str, names: list[str], record: bool = True) -> bool:
+    """True if these exact names were shown in the last SHORTLIST_QUIET turns; records this turn
+    unless ``record`` is False (the caller records after the print/hold-out decision)."""
+    if not session_id:
+        return False
+    f = SESSION_DIR / f"shortlist-{re.sub(r'[^A-Za-z0-9_-]', '_', session_id)}.json"
+    try:
+        hist = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        hist = []
+    key = "|".join(sorted(names))
+    seen = key in [h for h in hist[-SHORTLIST_QUIET:] if h]
+    if not record and not seen:
+        return seen          # the caller records once the line is really printed
+    hist = (hist + [key if not seen else ""])[-SHORTLIST_QUIET:]
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(hist), encoding="utf-8")
+    except OSError:
+        pass
+    return seen
+
+
+# Lines printed before 2026-11-02 used this prefix; still parsed so old transcripts read the same.
+LEGACY_SHORTLIST_MARKER = "[skill-router] Possibly relevant installed skills ("
+SUGGESTION_RE = re.compile(r'^\[skill-router\] Possible fit: Skill\(skill="([^"]+)"\)')
+
+
+def _shown_from_output(chain: list[Step], text: str) -> tuple[list[str], list[str]]:
+    """(card skills, shortlist names) exactly as printed this turn."""
+    card = [s.skill for s in chain] if text else []
+    shortlist: list[str] = []
+    for line in (text or "").splitlines():
+        if line.startswith((SHORTLIST_MARKER, LEGACY_SHORTLIST_MARKER)) and ": " in line:
+            shortlist += [n.strip() for n in line.split(": ", 1)[1].split(" · ") if n.strip()]
+        elif m := SUGGESTION_RE.match(line):
+            shortlist.append(m.group(1))
+    return card, shortlist
+
+
+def _outcomes():
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import outcomes  # type: ignore[import-not-found]
+        return outcomes
+    except Exception:
+        return None
+
+
+def _record_outcome_turn(hook_meta: dict, prompt: str) -> None:
+    """Open this turn in the outcomes log; scores the previous one if this is a correction."""
+    mod = _outcomes()
+    if mod is None:
+        return
+    try:
+        mod.on_prompt(str(hook_meta.get("session_id") or ""),
+                      str(hook_meta.get("prompt_id") or ""), prompt)
+    except Exception:
+        pass
+
+
+def _record_outcome_shown(chain: list[Step], text: str, held_out: bool = False) -> None:
+    mod = _outcomes()
+    if mod is None or not SESSION_ID:
+        return
+    try:
+        card, shortlist = _shown_from_output(chain, text)
+        mod.record_shown(SESSION_ID, PROMPT_ID, card, shortlist,
+                         "jev" if JEV_ROUTED else "keyless", held_out=held_out,
+                         chars=len(text or ""), project=PROJECT)
+    except Exception:
+        pass
+
+
+def features_path() -> Path:
+    override = os.environ.get("SKILL_ROUTER_FEATURES_FILE")
+    return Path(override) if override else Path.home() / ".claude" / "skill_router_cache" / "jev-features.jsonl"
+
+
+def _record_jev_features(prompt: str) -> None:
+    """Distillation row for a future local chooser: retrieval top-10s, Jev's answer, a prompt hash.
+
+    Names, numbers and a hash only (never prompt text). Hook mode with a Jev answer only; never raises.
+    """
+    try:
+        choice = JEV_CHOICE
+        if not (JEV_ANSWERED and choice is not None and SESSION_ID and PROMPT_ID):
+            return
+        if os.environ.get("SKILL_ROUTER_NO_LEARN") == "1":
+            return
+        import hashlib
+        import index_match  # type: ignore[import-not-found]
+        types = _entry_types()
+        ranked = index_match.rank(prompt, limit=50)
+        lex = [m.name for m in ranked if _shortlistable(m.name, types, m.kind)][:10]
+        known = {n for n in types if types[n] not in _NOT_SHORTLISTED_TYPES}
+        sem = [n for n in (_semantic_order(prompt) or []) if isinstance(n, str)
+               and _shortlistable(n, types) and (not known or n in known)][:10]
+        row = {"ts": round(time.time(), 3), "session_id": SESSION_ID[:200], "prompt_id": PROMPT_ID[:200],
+               "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+               "lex_top10": lex, "sem_top10": sem,
+               "jev_ranked": [str(n)[:200] for n in (choice.ranked or ())][:10],
+               "jev_domain": choice.domain.name, "jev_conf": round(float(choice.domain.confidence), 4),
+               "jev_path": str(choice.path or "")[:50]}
+        if PROJECT:
+            row["project"] = PROJECT
+        path = features_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+    except Exception:
+        pass
+
+
+DEFAULT_HOLDOUT = 0.10
+
+
+def holdout_rate() -> float:
+    """SKILL_ROUTER_HOLDOUT as a fraction in [0, 1]; default 0.10, 0 disables."""
+    raw = os.environ.get("SKILL_ROUTER_HOLDOUT")
+    if raw is None or not raw.strip():
+        return DEFAULT_HOLDOUT
+    try:
+        return min(1.0, max(0.0, float(raw)))
+    except ValueError:
+        return DEFAULT_HOLDOUT
+
+
+def holdout(session_id: str, prompt_id: str, rate: float) -> bool:
+    """Deterministic coin: sha256(session_id + prompt_id) mod 10,000 < rate * 10,000."""
+    try:
+        digest = hashlib.sha256((str(session_id) + str(prompt_id)).encode("utf-8")).hexdigest()
+        return int(digest, 16) % 10000 < rate * 10000
+    except Exception:
+        return False
+
+
+def _record_printed_shortlists(text: str) -> None:
+    """Remember the names of shortlist lines that were really printed this turn."""
+    if not SESSION_ID:
+        return
+    for line in (text or "").splitlines():
+        if line.startswith((SHORTLIST_MARKER, LEGACY_SHORTLIST_MARKER)) and ": " in line:
+            names = [n.strip() for n in line.split(": ", 1)[1].split(" · ") if n.strip()]
+            if names:
+                _shortlist_recent(SESSION_ID, names)
+
+
+def _warning_lines(text: str) -> list[str]:
+    """Lines of an announcement that carry no skill name: the Work: tier line and the quota nudge."""
+    return [ln for ln in (text or "").splitlines()
+            if ln.startswith(("[skill-router] Work:", "[skill-router] Quota:",
+                              "[skill-router] Kimi mode:"))]
+
+
+def _held_out_this_turn(path: str, chain: list[Step], text: str) -> bool:
+    """Hook mode only, with both a session id and a prompt id; hard routes (BROKEN,
+    gated project routes) are never held out.
+
+    Output carrying no skill name (a quota nudge alone) is never held out: it
+    is a warning, not a recommendation, and there would be nothing to log.
+    """
+    try:
+        card, shortlist = _shown_from_output(chain, text)
+        if not (card or shortlist):
+            return False
+        # An empty prompt id would fix the coin for the whole session: never hold out then.
+        if os.environ.get("SKILL_ROUTER_HOOK_MODE") != "1" or not SESSION_ID or not PROMPT_ID:
+            return False
+        if path == "BROKEN" or LAST_CARD.tier == "hard":
+            return False
+        return holdout(SESSION_ID, PROMPT_ID, holdout_rate())
+    except Exception:
+        return False
 
 
 def main() -> int:
@@ -2495,6 +2898,8 @@ def main() -> int:
         clear_pending(str(hook_meta.get("session_id") or ""))
     if not prompt:
         return 0
+    if hook_mode:
+        _record_outcome_turn(hook_meta, prompt)
     # Escape hatch: user explicitly opts out of routing for this turn.
     if escape_active(prompt):
         return 0
@@ -2507,9 +2912,11 @@ def main() -> int:
             print("[skill-router] (stand-down — explicit slash-command invocation)",
                   file=sys.stderr)
         return 0
-    global PREV_ASSISTANT, LOADED, SESSION_ID, PROMPT_ID
+    global PREV_ASSISTANT, LOADED, SESSION_ID, PROMPT_ID, JEV_ROUTED, PROJECT
+    JEV_ROUTED = False
     SESSION_ID = str(hook_meta.get("session_id") or "") if hook_mode else ""
     PROMPT_ID = str(hook_meta.get("prompt_id") or "") if hook_mode else ""
+    PROJECT = _project_of(hook_meta) if hook_mode else None
     PREV_ASSISTANT = previous_assistant_tail(hook_meta) if hook_mode else ""
     LOADED = loaded_this_session(hook_meta) if hook_mode else frozenset()
     try:
@@ -2519,8 +2926,20 @@ def main() -> int:
         return 1
     if hook_mode:
         log_prompt_event(prompt, hook_meta, path, chain)
+        _record_jev_features(prompt)
+    if announcement and _held_out_this_turn(path, chain, announcement):
+        # Measured silence: log what would have been shown, print nothing and
+        # write no pending state, so the Stop hook asks about nothing either.
+        _record_outcome_shown(chain, announcement, held_out=True)
+        # The skill-bearing lines stay silent; warnings carry no skill name and still print.
+        warnings = _warning_lines(announcement)
+        if warnings:
+            print("\n".join(warnings))
+        return 0
     if announcement:
         print(announcement)
+        if hook_mode:
+            _record_printed_shortlists(announcement)
         # Logging, like pending state, belongs to hook mode only. Every test
         # run, doctor smoke prompt and manual probe used to write a
         # chain-start event that no Skill call would ever follow — the learner
@@ -2533,13 +2952,26 @@ def main() -> int:
         if hook_mode and chain:
             log_chain(path, chain, domains, meta=hook_meta)
             write_pending(chain, path, domains, meta=hook_meta)
+        if hook_mode:
+            _record_outcome_shown(chain, announcement)
     else:
         # Both regex triage and embedding fallback returned SKIP. Last-ditch
         # path: check the online catalog for a novel uninstalled skill that
         # token-matches the prompt. Soft suggestion only — no write_pending(),
         # no IRON enforcement, since the skill can't actually be invoked.
-        suggestion = suggest_online_skill(prompt)
-        if suggestion is not None:
+        line = shortlist_line(prompt, path, LOADED)
+        if line and hook_mode and _shortlist_recent(SESSION_ID, line.split(": ", 1)[1].split(" · "),
+                                                    record=False):
+            line = ""
+        suggestion = None if line else suggest_online_skill(prompt)
+        if line and _held_out_this_turn(path, [], line):
+            _record_outcome_shown([], line, held_out=True)
+        elif line:
+            print(line)
+            if hook_mode:
+                _record_printed_shortlists(line)
+                _record_outcome_shown([], line)
+        elif suggestion is not None:
             print(render_online_suggestion(suggestion))
         elif os.environ.get("SKILL_ROUTER_DEBUG") == "1":
             print(f"[skill-router] (silent — no clear route for prompt of {len(prompt)} chars)", file=sys.stderr)

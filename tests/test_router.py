@@ -56,6 +56,7 @@ def setUpModule() -> None:
 
 import router  # type: ignore[import-not-found]
 import embedder_daemon  # type: ignore[import-not-found]
+import catalog_match  # type: ignore[import-not-found]
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
@@ -86,7 +87,9 @@ def _isolate_state() -> None:
 # Table tests declare their installed skills; ghost-guard tests override this
 # loader explicitly to exercise missing skills. No host installation needed.
 _CATALOG_PATCHES = [patch.object(router, "_skill_catalog", return_value=set(['connect-apps', 'feature-dev:feature-dev', 'frontend-design:frontend-design', 'refactor', 'security', 'supabase:supabase', 'superpowers:brainstorming', 'superpowers:finishing-a-development-branch', 'superpowers:requesting-code-review', 'superpowers:systematic-debugging', 'superpowers:test-driven-development', 'superpowers:verification-before-completion', 'superpowers:writing-plans', 'superpowers:writing-skills', 'vercel:deploy', 'vercel:vercel-functions'])),
-                    patch.object(router, "_agent_catalog", return_value=None)]
+                    patch.object(router, "_agent_catalog", return_value=None),
+                    # The specialist layer reads this file; never the live one.
+                    patch.object(catalog_match, "CATALOG_FILE", Path(_STATE) / "no-catalog.json")]
 
 
 def tearDownModule() -> None:
@@ -810,8 +813,8 @@ class TestOnlineCatalogSuggestion(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_real_catalog_loads_under_budget(self) -> None:
-        if os.environ.get("SKILL_ROUTER_CHECK_LIVE") != "1" and not (Path.home() / ".claude" / "skills" / "mac-doctor").exists():
-            self.skipTest("needs the reference skill install (or SKILL_ROUTER_CHECK_LIVE=1)")
+        if os.environ.get("SKILL_ROUTER_CHECK_LIVE") != "1":
+            self.skipTest("reads the live install; set SKILL_ROUTER_CHECK_LIVE=1")
         # Use the actual on-disk catalogs (no fixture) to verify the load
         # path + perf budget. Restore loader so cache_clear hits the real one.
         router._online_skill_index = self._real_index  # type: ignore[assignment]

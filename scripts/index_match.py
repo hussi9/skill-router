@@ -173,6 +173,73 @@ def expand(tokens: Sequence[str], text: str = "") -> list[str]:
     return seen + extra
 
 
+# ---- typo tolerance (layer 1) -------------------------------------------------
+#
+# Real prompts are typed fast: "databsae", "framwork", "integartion". Token matching
+# dies on those, which is most of why the keyword stage lost to Jev. A prompt token the
+# index has never seen is mapped to the closest index token within a small edit distance
+# (optimal string alignment: insert, delete, substitute, swap adjacent letters).
+# Only unknown tokens are touched, so a correctly spelled word is never "corrected".
+
+FUZZY = os.environ.get("SKILL_ROUTER_FUZZY", "1") not in ("0", "off", "false")
+
+
+def _osa(a: str, b: str, limit: int) -> int:
+    """Optimal-string-alignment distance, giving up (limit + 1) once it must exceed limit."""
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    prev2: list[int] = []
+    prev = list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        cur = [i] + [0] * len(b)
+        best = cur[0]
+        for j in range(1, len(b) + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            v = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                v = min(v, prev2[j - 2] + 1)
+            cur[j] = v
+            best = min(best, v)
+        if best > limit:
+            return limit + 1
+        prev2, prev = prev, cur
+    return prev[-1]
+
+
+def _budget(token: str) -> int:
+    return 0 if len(token) < 4 else 1 if len(token) <= 6 else 2
+
+
+def correct(tokens: Sequence[str], idx: "_Index") -> dict[str, str]:
+    """{typo: index token} for tokens the index does not know. Ties go to the more common word."""
+    if not FUZZY:
+        return {}
+    out: dict[str, str] = {}
+    by_len = idx.by_len
+    for t in tokens:
+        if t in idx.df or t in out or t in STOPWORDS:
+            continue
+        k = _budget(t)
+        if not k:
+            continue
+        best, best_d, best_df = "", k + 1, -1
+        for n in range(len(t) - k, len(t) + k + 1):
+            for cand in by_len.get(n, ()):
+                # Cheap reject: an edit budget of k cannot fix more than 2k differing letters.
+                if len(set(t) ^ set(cand)) > 2 * k:
+                    continue
+                # People rarely mistype the first letter. Allow it only as a swap of the
+                # first two ("rfamework"), so "rouse" does not become "house".
+                if cand[0] != t[0] and not (len(t) > 1 and cand[:2] == t[1::-1]):
+                    continue
+                d = _osa(t, cand, k)
+                if d < best_d or (d == best_d and idx.df[cand] > best_df):
+                    best, best_d, best_df = cand, d, idx.df[cand]
+        if best and best_d <= k:
+            out[t] = best
+    return out
+
+
 # ---- index ------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -204,6 +271,8 @@ class _Index:
     alias_project: dict[str, str] = field(default_factory=dict)
     # project name -> its alias tokens
     project_aliases: dict[str, frozenset[str]] = field(default_factory=dict)
+    # token length -> index tokens of that length (typo correction candidates)
+    by_len: dict[int, tuple[str, ...]] = field(default_factory=dict)
 
     def is_rare(self, t: str) -> bool:
         return self.df.get(t, 0) <= self.rare_max
@@ -258,7 +327,12 @@ def load_index(path: Optional[str] = None) -> Optional[_Index]:
         project_aliases[pname] = toks
         for t in toks:
             alias_project.setdefault(t, pname)
+    lens: dict[int, list[str]] = {}
+    for tok in df:
+        if len(tok) >= 3 and not tok.isdigit():
+            lens.setdefault(len(tok), []).append(tok)
     return _Index(tuple(docs), idf, df,
+                  by_len={n: tuple(v) for n, v in lens.items()},
                   rare_max=max(1, math.ceil(RARE_DF_RATIO * n)),
                   very_rare_max=max(1, math.ceil(VERY_RARE_DF_RATIO * n)),
                   alias_project=alias_project, project_aliases=project_aliases)
@@ -357,6 +431,9 @@ def rank(prompt: str, limit: int = 5, index_path: Optional[str] = None,
     base = list(dict.fromkeys(tokenize(prompt)))
     if not base:
         return []
+    fixed = correct(base, idx)
+    if fixed:
+        base = list(dict.fromkeys(fixed.get(t, t) for t in base))
     q = expand(base, prompt)
     full_credit = set(base) | set(phrase_tokens(prompt))
     norm = math.sqrt(len(base))
@@ -434,6 +511,107 @@ def is_request(text: str) -> bool:
     'tidy up the helpers folder' → yes. 'the recent refactor broke the auth
     flow' → no (BROKEN still catches it through its own signal words)."""
     return bool(_IMPERATIVE.match(text) or _REQUEST_MARKERS.search(text))
+
+
+# ---- work signal (shortlist gate only; detect_path and route cards do not use it) ----
+
+# A reply that opens with an acknowledgement or a pick before the instruction:
+# "Yes, publish ...", "Go with B: add ...", "ok so ...".
+_ACK_LEAD = re.compile(
+    r"^\s*(?:(?:yes|yeah|yep|ok(?:ay)?|sure|great|perfect|right|cool|good|fine|alright|so|and|"
+    r"go with [\w-]+|option [\w-]+|go)\b[\s,.:;!-]*)+", re.IGNORECASE)
+# A verb is an instruction only when an object follows it: "keep the logs" is work,
+# "Keep in mind ..." and "Plan looks fine" are not.
+_OBJECT = (r"\s+(?:the|a|an|this|that|these|those|it|them|all|my|our|your|his|her|their|some|"
+           r"each|every|both|everything|any)\b")
+# "go do the cross post", "just do it": the verb is "do" with an object, not a question.
+_DO_LEAD = re.compile(r"^\s*(?:go\s+|just\s+|now\s+)?do" + _OBJECT + r"(?!.*\?\s*$)", re.IGNORECASE)
+# Work verbs is_request leaves out (it also feeds detect_path, which must not move).
+_EXTRA_IMPERATIVE = re.compile(
+    r"^(?:please\s+)?(?:commit|brainstorm|customi[sz]e|adopt|map|plan|apply|install|remove|"
+    r"delete|restore|sync|import|export|organi[sz]e|categori[sz]e|sort|group|put|keep|"
+    r"use|start|continue|finish|redo|retry|rerun|resume|translate|summari[sz]e)" + _OBJECT,
+    re.IGNORECASE)
+_IMPERATIVE_WITH_OBJECT = re.compile(_IMPERATIVE.pattern + _OBJECT, re.IGNORECASE)
+# Request markers is_request leaves out: short forms and proposals for shared work.
+_REQUEST_EXTRA = re.compile(
+    r"\b(?:can|could|would) u\b|\bpl[sz]\b|\b(?:can|could|shall) we\b|"
+    r"\bwe (?:can|could) (?:adopt|adapt|use|build|add|try|start|move|switch|reuse|fork|integrate)\b",
+    re.IGNORECASE)
+_SENTENCE = re.compile(r"(?<=[.!;])\s+|\n+")
+_GREETING = re.compile(
+    r"^\s*(hi|hello|hey|thanks?|thank you|thx|ok(?:ay)?|yes|no|yep|nope|sure|got it|noted)\W*$",
+    re.IGNORECASE)
+_CONCEPT = re.compile(
+    r"\b(what(?:'s| is| are) (?:a|an|the)?\s*\w+\s*\??$|what does .{1,60} mean|\bmeans?\b|"
+    r"\bmeaning of\b|difference between|\bdefin(?:e|ition) of\b|stand for)", re.IGNORECASE)
+# Explanation questions ask how or why something is, not for something to be made.
+_EXPLAIN = re.compile(r"^\s*(?:how (?:does|do|did|is|are)|why (?:does|do|did|is|are))\b", re.IGNORECASE)
+_ASKS = re.compile(
+    r"\?\s*$|^\s*(what|why|how|when|where|which|who|is|are|does|do|did|can|could|should|"
+    r"would|will|shall)\b|\b(do (?:you|u) (?:think|see|agree|suggest|recommend)|which (?:is|one|would|should)|"
+    r"what do (?:you|u) (?:think|suggest|recommend)|your (?:take|opinion|view))\b", re.IGNORECASE)
+# Things a person builds, ships or runs: a question about one is usually a task.
+_DELIVERABLE_WORDS = (
+    "account", "agent", "audit", "automate", "automation", "campaign", "carousel", "channel",
+    "dashboard", "database", "deploy", "domain", "engine", "feature", "funnel", "integration",
+    "landing", "launch", "listing", "login", "migrate", "migration", "newsletter", "onboarding",
+    "pipeline", "platform", "plugin", "pricing", "product", "profile", "release", "schema",
+    "script", "server", "store", "subscription", "video", "website")
+_DELIVERABLE = re.compile(
+    r"\b(page|pages|app|apps|site|saas|repo|db|api|bot|ads|crm|" +
+    "|".join(w + "s?" for w in _DELIVERABLE_WORDS) + r"|deploy\w*|migrat\w*)\b", re.IGNORECASE)
+
+
+def _names_deliverable(text: str) -> bool:
+    """_DELIVERABLE, tolerating one or two typing slips per long word (same budget as `correct`)."""
+    if _DELIVERABLE.search(text):
+        return True
+    for tok in re.findall(r"[a-z]{5,}", text.lower()):
+        lim = _budget(tok)
+        for w in _DELIVERABLE_WORDS:
+            if (tok[0] == w[0] or tok[:2] == w[1::-1]) and _osa(tok, w, lim) <= lim:
+                return True
+    return False
+
+
+def _instructs(text: str) -> bool:
+    """An imperative leads the turn, or a later sentence is an imperative with an object."""
+    sentences = [x for x in _SENTENCE.split(text) if x.strip()]
+    if not sentences:
+        return False
+    first = sentences[0]
+    rest = _ACK_LEAD.sub("", first, count=1)
+    if (_IMPERATIVE.match(first) or _IMPERATIVE.match(rest) or _EXTRA_IMPERATIVE.match(rest)
+            or _DO_LEAD.match(first)):
+        return True
+    return any(_IMPERATIVE_WITH_OBJECT.match(_ACK_LEAD.sub("", x, count=1)) for x in sentences[1:])
+
+
+def work_signal(prompt: str) -> float:
+    """How much this turn asks for work, 0-1. Gates the advisory shortlist, not the route card.
+
+    1.0  an imperative or request ("deploy the site", "Yes, publish it", "can we add retries")
+    0.8  something is broken ("the build fails on CI")
+    0.7  a question about a thing people build or run ("do you see the app becoming a saas?")
+    0.3  any other question or statement, and explanation questions ("how does X pick ...?")
+    0.1  a concept question ("what is a webhook?", "... - mean a separate server?")
+    0.0  empty, noise, a short acknowledgement, or three words or fewer
+    """
+    text = (prompt or "").strip()
+    if not text or _NOISE.search(text) or _GREETING.match(text):
+        return 0.0
+    if _REQUEST_MARKERS.search(text) or _REQUEST_EXTRA.search(text) or _instructs(text):
+        return 1.0
+    if _BROKEN.search(text):
+        return 0.8
+    if len(text.split()) <= 3:
+        return 0.0
+    if _CONCEPT.search(text):
+        return 0.1
+    if _ASKS.search(text) and not _EXPLAIN.match(text) and _names_deliverable(text):
+        return 0.7
+    return 0.3
 
 
 def detect_path(prompt: str) -> str:

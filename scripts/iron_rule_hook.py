@@ -40,7 +40,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
+import time
 from pathlib import Path
 
 HOME = Path.home()
@@ -96,7 +98,49 @@ def pending_tier(session_id: str = "") -> str:
     return "soft" if tier == "soft" else "hard"
 
 
-def record_soft_skip(skills: list[str], session_id: str = "") -> None:
+def last_assistant_text(transcript_path: str, max_bytes: int = 200_000) -> str:
+    """Text of the last non-sidechain assistant event in the transcript tail.
+    Empty on any error."""
+    if not transcript_path:
+        return ""
+    try:
+        with open(transcript_path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - max_bytes))
+            lines = fh.read().decode("utf-8", errors="ignore").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        if '"type":"assistant"' not in line and '"type": "assistant"' not in line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue                                   # first line of the window may be cut
+        if not isinstance(ev, dict) or ev.get("type") != "assistant" or ev.get("isSidechain"):
+            continue
+        content = (ev.get("message") or {}).get("content")
+        if isinstance(content, str):
+            text = content
+        else:
+            text = "\n".join(p.get("text", "") for p in content or []
+                             if isinstance(p, dict) and p.get("type") == "text")
+        if text.strip():
+            return text
+    return ""
+
+
+def skip_reason(text: str, skill: str) -> str | None:
+    """The reason in a '[skill-router] skipped <skill>: <reason>' line, else None."""
+    match = re.search(r"^\[skill-router\] skipped " + re.escape(skill) + r":[ \t]*(.*?)[ \t]*$",
+                      text or "", re.MULTILINE)
+    if not match or not match.group(1):
+        return None
+    return match.group(1)
+
+
+def record_soft_skip(skills: list[str], session_id: str = "", reason: str | None = None) -> None:
     """A soft route reached turn end without its skill: log it so the learner
     can demote a skill the model keeps declining, and mark the state so the
     second Stop is not blocked again."""
@@ -105,13 +149,15 @@ def record_soft_skip(skills: list[str], session_id: str = "") -> None:
         # writes fake skips into the live log the learner reads.
         LOG = PENDING.parent / "skill_router_log.jsonl"
         state = read_pending_state(session_id)
+        event = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "type": "soft-skip",
+            "skills": skills, "session_id": state.get("session_id"),
+            "prompt_id": state.get("prompt_id"),
+        }
+        if reason:
+            event["reason"] = reason[:200]
         with LOG.open("a") as f:
-            import time
-            f.write(json.dumps({
-                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "type": "soft-skip",
-                "skills": skills, "session_id": state.get("session_id"),
-                "prompt_id": state.get("prompt_id"),
-            }) + "\n")
+            f.write(json.dumps(event) + "\n")
         state["soft_asked"] = True
         target = pending_path(PENDING, session_id)
         if target is not None:
@@ -201,6 +247,10 @@ def main() -> int:
         if mode != "stop":
             return 0
         if read_pending_state(session_id).get("soft_asked"):
+            return 0
+        reason = skip_reason(last_assistant_text(str(data.get("transcript_path") or "")), expected)
+        if reason:
+            record_soft_skip(remaining, session_id, reason)
             return 0
         record_soft_skip(remaining, session_id)
         emit({

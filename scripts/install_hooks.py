@@ -53,6 +53,7 @@ OWNED_SCRIPTS = (
     "skill-router/scripts/skill_invoked.py",
     "skill-router/scripts/subagent_brief.py",
     "skill-router/scripts/build_catalog.py",
+    "skill-router/scripts/outcomes.py",
 )
 
 
@@ -61,6 +62,21 @@ def _is_ours(hook_entry: dict) -> bool:
         return True
     command = hook_entry.get("command")
     return isinstance(command, str) and any(s in command for s in OWNED_SCRIPTS)
+
+
+def _bash_prefilter(python_command: str) -> str:
+    """Run ``python_command`` only when the hook payload mentions a test runner.
+
+    A POSIX ``case`` costs about a millisecond; starting Python on every shell
+    command cost 70-100 ms. The runner list is outcomes.TEST_RUNNERS.
+    """
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from outcomes import TEST_RUNNERS  # type: ignore[import-not-found]
+    patterns = "|".join(f'*"{r}"*' if " " in r else f"*{r}*" for r in TEST_RUNNERS)
+    return (f'in=$(cat); case "$in" in {patterns}) '
+            f"printf '%s' \"$in\" | {python_command} ;; esac")
 
 
 def hook(command: str, timeout: int, purpose: str) -> dict:
@@ -136,6 +152,24 @@ def managed_hooks() -> dict[str, list[dict]]:
                 f"python3 {SCRIPTS}/skill_invoked.py", 5,
                 "Record the invocation, drop it from pending state, and re-arm "
                 "the skill by clearing its strike and override tallies.",
+            )],
+        }, {
+            MARKER: True,
+            "matcher": "Bash",
+            "hooks": [hook(
+                _bash_prefilter(f"python3 {SCRIPTS}/outcomes.py --post-bash"), 5,
+                "Record tests_green / tests_red when a test command finishes, "
+                "so shown skill lines can be scored by what happened next.",
+            )],
+        }],
+        # Failing Bash calls skip PostToolUse and arrive here instead. Older
+        # Claude Code versions without this event simply never fire it.
+        "PostToolUseFailure": [{
+            MARKER: True,
+            "matcher": "Bash",
+            "hooks": [hook(
+                _bash_prefilter(f"python3 {SCRIPTS}/outcomes.py --post-bash-failure"), 5,
+                "Record tests_red when a test command fails.",
             )],
         }],
         "Stop": [{

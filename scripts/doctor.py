@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -46,6 +47,9 @@ CATALOG = HOME / ".claude" / "skill_router_catalog.json"
 
 REQUIRED_EVENTS = ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop",
                    "SubagentStart", "SessionStart")
+# Wired by the installer but not required: an older Claude Code that does not
+# know the event never fires it, and routing works without it.
+OPTIONAL_EVENTS = ("PostToolUseFailure",)
 CATALOG_STALE_DAYS = 7
 
 # Prompts that must produce an announcement. If routing is dead, this is the
@@ -58,15 +62,23 @@ SMOKE_PROMPTS = (
 
 
 class Report:
-    def __init__(self, quiet: bool) -> None:
+    def __init__(self, quiet: bool, gate: bool = False) -> None:
         self.quiet = quiet
         self.failed = 0
+        self.gate = gate
 
-    def check(self, name: str, ok: bool, detail: str = "", fix: str = "") -> bool:
-        if not ok:
+    def check(self, name: str, ok: bool, detail: str = "", fix: str = "",
+              machine: bool = False) -> bool:
+        """`machine=True` marks a check of this machine's state, not the repo.
+
+        In gate mode (`--gate` / SKILL_ROUTER_DOCTOR_GATE=1) such a check that
+        fails prints `[warn]` and does not count: the gate tests the repo.
+        """
+        warn_only = (not ok) and machine and self.gate
+        if not ok and not warn_only:
             self.failed += 1
         if not self.quiet:
-            mark = "ok  " if ok else "FAIL"
+            mark = "ok  " if ok else ("warn" if warn_only else "FAIL")
             print(f"  [{mark}] {name}" + (f" — {detail}" if detail else ""))
             if not ok and fix:
                 print(f"         fix: {fix}")
@@ -104,11 +116,18 @@ def check_hooks(r: Report) -> None:
         for hook in group.get("hooks", []) if isinstance(hook, dict) and _is_ours(hook)
     }
     missing = [e for e in REQUIRED_EVENTS if e not in installed]
+    optional = [
+        event for event in OPTIONAL_EVENTS
+        if any(isinstance(g, dict) and any(isinstance(h, dict) and _is_ours(h)
+                                           for h in g.get("hooks", []))
+               for g in hooks.get(event, []) if isinstance(hooks.get(event), list))
+    ]
     r.check(
         "hooks installed in settings.json",
         not missing,
         f"{len(installed)}/{len(REQUIRED_EVENTS)} events wired"
-        + (f"; missing {', '.join(missing)}" if missing else ""),
+        + (f"; missing {', '.join(missing)}" if missing else "")
+        + f" · optional {len(optional)}/{len(OPTIONAL_EVENTS)}",
         "python3 scripts/install_hooks.py",
     )
 
@@ -120,6 +139,70 @@ def _hook_is_ours(hook: dict) -> bool:
         return _is_ours(hook)
     except ImportError:
         return bool(hook.get("_skill_router"))
+
+
+def check_skill_audit(r: Report) -> None:
+    """Advisory only: one line of `skill doctor` numbers. Keyless, never a FAIL."""
+    name, fix = "skill audit", "python3 scripts/cli.py audit"
+    try:
+        import skill_audit  # type: ignore[import-not-found]
+        catalog, usage, days, outcomes, skills_sh = skill_audit.load_inputs()
+        rep = skill_audit.audit(catalog, usage, days, outcomes, skills_sh, jev=None, budget_s=1.5,
+                                settings=skill_audit.load_settings())
+        top = (rep.top_actions[0] if rep.top_actions else "nothing to do")[:90]
+        detail = (f"score {rep.score}/100 · ~{rep.listing_sent_tokens / 1000:.1f}k of "
+                  f"~{rep.listing_tokens / 1000:.1f}k (uncapped) listing tokens fit; "
+                  f"{rep.descriptions_dropped} descriptions dropped · top: {top}")
+    except Exception:  # noqa: BLE001 — advice must never break the doctor
+        detail = "unavailable"
+    r.check(name, True, f"{detail} (run: {fix})")
+
+
+def check_visibility(r: Report) -> None:
+    """Advisory only. Reads the cache `visibility plan` writes; never scans transcripts (those take ~10 s)."""
+    name, fix = "skill visibility", "python3 scripts/cli.py visibility plan"
+    try:
+        import visibility  # type: ignore[import-not-found]
+        projects = (visibility.read_summary().get("projects") or {})
+        if not projects:
+            detail = "no plan measured yet"
+        else:
+            data = visibility.read_summary()
+            counted = sum(1 for v in projects.values() if (v.get("names_count") or {}).get("worthwhile"))
+            free = sum(1 for v in projects.values() if (v.get("names_free") or {}).get("worthwhile"))
+            levers = []
+            for label, k in (("names count", "names_count"), ("names free", "names_free")):
+                ents = [v[k] for v in projects.values() if isinstance(v.get(k), dict)]
+                reach = [(e["budget_fraction"], e.get("budget_extra_tokens", 0)) for e in ents
+                         if e.get("budget_fraction")]
+                if reach:
+                    f, t = max(reach)
+                    levers.append(f"{label}: skillListingBudgetFraction {f:.3f} ({t:+d} tokens/session), "
+                                  f"reachable in {len(reach)} of {len(ents)}")
+                else:
+                    levers.append(f"{label}: not reachable (<= 0.10) in any of {len(ents)}")
+            lever = "budget lever " + "; ".join(levers)
+            age = max(0, int((time.time() - float(data.get("updated") or 0)) // 86400))
+            fresh = f"measured {age} days ago" + (", stale: re-run plan" if age > 30 else "")
+            detail = (f"archive the {data.get('unused_skills', 0)} unused skills (python3 scripts/cli.py audit); "
+                      f"{lever}; plan worthwhile in {counted} (names count) / {free} (names free) of "
+                      f"{len(projects)} projects; {fresh}")
+    except Exception:  # noqa: BLE001 — advice must never break the doctor
+        detail = "unavailable"
+    r.check(name, True, f"{detail} (run: {fix})")
+
+
+def check_listing(r: Report) -> None:
+    """Advisory only. Reads the cache `listing measure` writes; the doctor never runs the probe."""
+    fix = "python3 scripts/cli.py listing measure"
+    try:
+        import listing_probe  # type: ignore[import-not-found]
+        import project_usage  # type: ignore[import-not-found]
+        m = listing_probe.load(project_usage.project_key(Path.cwd()))
+        detail = listing_probe.line(m) if m else f"not measured — {fix}"
+    except Exception:  # noqa: BLE001 — advice must never break the doctor
+        detail = "unavailable"
+    r.check("skill listing", True, detail)
 
 
 def check_hook_scripts(r: Report) -> None:
@@ -139,6 +222,98 @@ def check_hook_scripts(r: Report) -> None:
     r.check("hook scripts exist on disk", not missing,
             "; ".join(missing) if missing else "all referenced files present",
             "reinstall or restore the missing script")
+
+
+def _expand_home(token: str) -> str:
+    home = str(HOME)
+    for var in ("${HOME}", "$HOME", "~"):
+        if token.startswith(var) and token[len(var):len(var) + 1] in ("", "/"):
+            return home + token[len(var):]
+    return token
+
+
+def live_install_dir(settings: dict) -> "Path | None":
+    """Skill-router root of the router.py the UserPromptSubmit hook runs, or None."""
+    groups = (settings.get("hooks") or {}).get("UserPromptSubmit") or []
+    for group in groups if isinstance(groups, list) else []:
+        for hook in group.get("hooks", []) if isinstance(group, dict) else []:
+            if not isinstance(hook, dict):
+                continue
+            for raw in str(hook.get("command", "")).split():
+                token = _expand_home(raw.strip("\"'"))
+                if token.endswith("scripts/router.py"):
+                    return Path(token).parent.parent
+    return None
+
+
+def hook_modules(repo: Path) -> list[str]:
+    """Filenames (scripts/<name>) the installed hooks execute, plus the sibling
+    modules they import, found by following `import x` / `from x import` lines
+    transitively. Starts from install_hooks.OWNED_SCRIPTS (the hook commands)."""
+    import re
+    from install_hooks import OWNED_SCRIPTS  # type: ignore[import-not-found]
+    scripts = Path(repo) / "scripts"
+    present = {p.stem for p in scripts.glob("*.py")}
+    todo = [Path(s).stem for s in OWNED_SCRIPTS if s.endswith(".py")]
+    seen: set[str] = set()
+    pat = re.compile(r"^\s*(?:from|import)\s+([A-Za-z_]\w*)", re.M)
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in present:
+            continue
+        seen.add(name)
+        try:
+            todo.extend(pat.findall((scripts / f"{name}.py").read_text(encoding="utf-8")))
+        except OSError:
+            pass
+    return sorted(f"{n}.py" for n in seen)
+
+
+def drift(repo: Path, live: Path) -> list[str]:
+    """Relative paths of hook-relevant scripts that differ from, or are missing in, the live copy.
+
+    Only the scripts the hooks run and the modules they import are compared;
+    tooling the hooks never load (benchmarks, this doctor) is not drift.
+    """
+    import hashlib
+    try:
+        if Path(live).resolve() == Path(repo).resolve():
+            return []
+    except OSError:
+        pass
+
+    def digest(p: Path) -> str:
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+
+    out: list[str] = []
+    for src in (Path(repo) / "scripts" / n for n in hook_modules(repo)):
+        dst = Path(live) / "scripts" / src.name
+        try:
+            if not dst.is_file() or digest(src) != digest(dst):
+                out.append(f"scripts/{src.name}")
+        except OSError:
+            out.append(f"scripts/{src.name}")
+    return out
+
+
+def _tilde(path: Path) -> str:
+    s = str(path)
+    return "~" + s[len(str(HOME)):] if s.startswith(str(HOME)) else s
+
+
+def check_live_drift(r: Report) -> None:
+    live = live_install_dir(load_settings())
+    if live is None:
+        return  # no hook to compare; check_hooks already reports that
+    stale = drift(ROOT, live)
+    # No --delete: the live dir is shared with other agents.
+    fix = (f"preview: rsync -avn {_tilde(ROOT)}/scripts/ {_tilde(live)}/scripts/\n"
+           f"         apply:   rsync -a {_tilde(ROOT)}/scripts/ {_tilde(live)}/scripts/ "
+           f"&& python3 {_tilde(live)}/scripts/install_hooks.py")
+    shown = ", ".join(stale[:5]) + (f" (+{len(stale) - 5} more)" if len(stale) > 5 else "")
+    r.check("live install in sync", not stale,
+            f"hooks run {_tilde(live)}" + (f"; differs: {shown}" if stale else ""), fix,
+            machine=True)
 
 
 def check_no_ghosts(r: Report) -> None:
@@ -349,7 +524,7 @@ def check_agent_models(r: Report) -> None:
             f"{len(pinned)} pinned: {', '.join(pinned[:6])}"
             + ("…" if len(pinned) > 6 else "")
             if pinned else "no agent overrides the session model",
-            "python3 scripts/fix_agent_models.py")
+            "python3 scripts/fix_agent_models.py", machine=True)
 
 
 def check_agents_register(r: Report) -> None:
@@ -388,7 +563,7 @@ def check_agents_register(r: Report) -> None:
             f"{len(unregistered)} invisible: {', '.join(unregistered)}"
             if unregistered else "every agent file has name + description",
             "add YAML frontmatter with name and description, or prefix the "
-            "filename with _ if it is not an agent")
+            "filename with _ if it is not an agent", machine=True)
 
 
 LEARNED = HOME / ".claude" / "skill_router_learned.json"
@@ -453,6 +628,10 @@ def reset_deferrals() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Check that skill routing is alive.")
     ap.add_argument("--quiet", action="store_true", help="exit code only")
+    ap.add_argument("--gate", action="store_true",
+                    help="repo gate: machine-state checks (live drift, pinned agents, "
+                         "agent registration) warn instead of fail "
+                         "(also SKILL_ROUTER_DOCTOR_GATE=1)")
     ap.add_argument("--reset-deferrals", action="store_true",
                     help="clear every strike and override tally")
     args = ap.parse_args()
@@ -463,9 +642,14 @@ def main() -> int:
     if not args.quiet:
         print("\nskill-router doctor\n")
 
-    r = Report(args.quiet)
+    gate = args.gate or os.environ.get("SKILL_ROUTER_DOCTOR_GATE") == "1"
+    r = Report(args.quiet, gate=gate)
     check_hooks(r)
     check_hook_scripts(r)
+    check_live_drift(r)
+    check_skill_audit(r)
+    check_visibility(r)
+    check_listing(r)
     check_no_ghosts(r)
     check_catalog(r)
     check_index(r)

@@ -35,6 +35,15 @@ At ≥ 0.8 the measured precision was 32 of 34 routed prompts. Silence is the ex
 questions and chat should not get a card. The threshold is pinned to the model version because it was measured
 on that version; a model change means re-measuring, not editing the number.
 
+## Below the gate: Jev's top three
+
+Jev returns a probability for every skill it was offered. When the top pick is below 0.8, the router names Jev's
+three most likely skills in one line and lets Claude choose (`SKILL_ROUTER_JEV_SHORTLIST=0` turns it off). Same
+request, no extra cost, at most 200 characters (about 185 typical), never enforced, gated to work turns. Measured
+in-sample with the work gate: the right skill reaches Claude on 10 of 27 hard real tasks (2 before) and 38 of 74
+everyday ones (11 before), and 0 of 6 chat controls got a line.
+Details: [no-key-routing.md](./no-key-routing.md).
+
 ## Work tier → which model does the work
 
 The `tier` answer is the only place the router ever changes which Claude model runs something.

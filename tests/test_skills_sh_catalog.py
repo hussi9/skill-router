@@ -149,6 +149,18 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(ok["install_command"], "npx skills add o/r --skill ok")
         self.assertIn("&", ok["description"])           # entities decoded
 
+    def test_flagged_identifiers_are_kept_in_metadata_only(self) -> None:
+        def with_bad_id(url: str) -> str:
+            if url.endswith("/audits"):
+                return page("initialRows", [
+                    {"rank": 1, "source": "o/r", "skillId": "ok", "p": {"verdict": "SAFE"}},
+                    {"rank": 2, "source": "o/r", "skillId": "evil", "p": {"verdict": "malicious"}},
+                    {"rank": 3, "source": "o/r;rm", "skillId": "x", "p": {"verdict": "malicious"}}])
+            return self.fetcher(url)
+        cat = sh.build(with_bad_id, now=1000.0)
+        self.assertEqual(cat["metadata"]["flagged"], [{"source": "o/r", "skill": "evil"}])
+        self.assertNotIn("evil", [e["name"] for e in cat["catalogs"]["skills.sh"]])
+
     def test_missing_audits_board_builds_nothing(self) -> None:
         def no_audits(url: str) -> str:
             if url.endswith("/audits"):

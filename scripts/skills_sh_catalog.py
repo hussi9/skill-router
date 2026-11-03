@@ -403,9 +403,15 @@ def build(fetcher: Callable[[str], str] = fetch, *, offline: bool = False, max_p
         errors.append("audits board unavailable: refusing to build an unscreened catalog")
         return {"catalogs": {"skills.sh": []},
                 "metadata": {"generated_at": now, "source": f"https://{HOST}", "boards": sorted(boards),
-                             "audited": 0, "total": 0, "errors": errors,
+                             "audited": 0, "total": 0, "errors": errors, "flagged": [],
                              "note": "suggestion cache only; nothing here is installed or invoked"}}
     audits = {f"{r['source']}/{r['skillId']}": audit_verdict(r) for r in boards[AUDITS]}
+    # Flagged skills never become entries, but their identifiers are kept so an audit of
+    # the installed skills can notice a local skill sharing a flagged public name.
+    flagged = sorted(({"source": r["source"], "skill": r["skillId"]} for r in boards[AUDITS]
+                      if safe_ids(r.get("source"), r.get("skillId"))
+                      and audits.get(f"{r['source']}/{r['skillId']}") == "flagged"),
+                     key=lambda f: (f["source"], f["skill"]))
 
     cand: dict[str, dict] = {}
     for path in BOARDS:
@@ -454,7 +460,7 @@ def build(fetcher: Callable[[str], str] = fetch, *, offline: bool = False, max_p
     return {"catalogs": {"skills.sh": entries},
             "metadata": {"generated_at": now, "source": f"https://{HOST}", "boards": sorted(boards),
                          "audited": sum(1 for e in entries if e["audit"] == "clean"),
-                         "total": len(entries), "errors": errors,
+                         "total": len(entries), "errors": errors, "flagged": flagged,
                          "note": "suggestion cache only; nothing here is installed or invoked"}}
 
 

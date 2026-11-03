@@ -150,10 +150,27 @@ Prompt *keywords* are logged, never prompt text. `SKILL_ROUTER_NO_LEARN=1` logs 
 
 Integrated manual external discovery: [search skills.sh, inspect pinned sources, and optionally rank with JEV](./docs/find-skills.md). It returns candidates for review and does not install or invoke them. [Supplied-candidate ranking](./docs/discovery.md) remains available. [Fresh conversation-context results](./docs/jev-context-2026-10-22/RESULTS.md) show no specialist-routing gain at the unchanged 0.8 threshold.
 
+## Skill doctor
+
+`python3 scripts/cli.py audit` reports what your installed skills cost and which look like dead
+weight, with a 0-100 score. It only recommends. Details: [docs/skill-audit.md](./docs/skill-audit.md).
+
+## MCP server
+
+`python3 mcp/server.py` serves `route`, `find_skill`, `audit_skills` and `listing` over stdio MCP for Codex, Cursor, Gemini CLI or Claude Code. Read-only; setup snippets in [mcp/README.md](./mcp/README.md).
+
+## Per-project visibility
+
+`python3 scripts/cli.py visibility plan` (a dry run) shows whether setting unused skills name-only
+would keep a project's own skills described in the capped listing. Measured on the three most active projects (sub-agent use included), the plan reaches the 80% bar in only one
+of three, and only under the optimistic names-free model with 93 overrides;
+archiving unused skills and the budget fraction may help. Details: [docs/visibility.md](./docs/visibility.md).
+
 ## Documentation
 
 | Doc | What you'll learn |
 |---|---|
+| [docs/skill-audit.md](./docs/skill-audit.md) | The skill audit: numbers, score formula, what is not tracked, privacy |
 | [docs/skills-sh.md](./docs/skills-sh.md) | The skills.sh cache: sources, screening, categories, limits |
 | [docs/jev.md](./docs/jev.md) | What Jev decides, the 0.8 gate, model-per-tier, what leaves your machine |
 | [docs/v4-design.md](./docs/v4-design.md) | The audit that motivated v4, the design, the deliverables |

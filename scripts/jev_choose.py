@@ -84,7 +84,7 @@ MAX_OPTIONS = 255                    # Choice limit, "none" included
 # skill that shares a builtin's name is indexed as a skill and stays routable.
 NOT_ROUTABLE = ("agent", "command", "plugin-command", "builtin")
 SELF_SKILL = "skill-router"          # the router never routes to its own documentation
-CACHE_VERSION = 2
+CACHE_VERSION = 3                    # 3: Choice.ranked (probability order)
 PROMPT_CHARS = 16000
 CONTEXT_CHARS = 4000
 # The previous assistant turn is sent only for short prompts. Measured on 63
@@ -145,6 +145,11 @@ class Choice:
     tokens: int
     cached: bool = False
     work: Pick = Pick(None, 0.0, "silent")   # tier: name in TIERS, or None
+    # Domain skills by Jev's probability across every chunk, best first (top RANKED_KEEP).
+    # The same answer the argmax comes from, so it costs nothing extra. Measured
+    # (docs/no-key-routing.md): the right skill is in the first three for 14 of 27 hard
+    # real tasks, where the >= 0.8 argmax routes 2.
+    ranked: tuple = ()
 
     @property
     def model(self) -> str:
@@ -357,6 +362,36 @@ def _pick(answers: dict, qids: Sequence[str], keymap: dict[str, dict[str, str]])
     return Pick(None, 0.0, "silent")
 
 
+RANKED_KEEP = 6
+
+
+def _ranked(answers: dict, keymap: dict[str, dict[str, str]]) -> tuple:
+    """Every option we sent across the domain chunks, by probability. Unknown keys are dropped."""
+    probs: list[tuple[float, str]] = []
+    for qid, keys in keymap.items():
+        if not qid.startswith("domain_"):
+            continue
+        a = answers.get(qid)
+        dist = a.get("probabilities") if isinstance(a, dict) else None
+        if not isinstance(dist, dict):
+            continue
+        for key, p in dist.items():
+            try:
+                pv = float(p)
+            except (TypeError, ValueError):
+                continue
+            if key in keys and math.isfinite(pv) and pv > 0:
+                probs.append((pv, keys[key]))
+    probs.sort(key=lambda x: (-x[0], x[1]))
+    out: list[str] = []
+    for _, n in probs:
+        if n not in out:
+            out.append(n)
+        if len(out) == RANKED_KEEP:
+            break
+    return tuple(out)
+
+
 def _fingerprint(questions: dict) -> str:
     return hashlib.sha1(json.dumps(questions, sort_keys=True).encode()).hexdigest()[:12]
 
@@ -365,8 +400,9 @@ def _from_cache(path: Path) -> Optional[Choice]:
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
         work = _cached_pick(d["work"]) if isinstance(d.get("work"), dict) else Pick(None, 0.0, "silent")
+        ranked = tuple(n for n in (d.get("ranked") or ()) if isinstance(n, str))[:RANKED_KEEP]
         return Choice(_cached_pick(d["domain"]), _cached_pick(d["process"]), d["path"],
-                      d["path_confidence"], d["ms"], d["tokens"], cached=True, work=work)
+                      d["path_confidence"], d["ms"], d["tokens"], cached=True, work=work, ranked=ranked)
     except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
         return None
 
@@ -484,7 +520,8 @@ def _run(prompt: str, context: str, entries: Optional[Sequence[dict]],
         path, pconf = "", 0.0
         if isinstance(pa, dict) and pa.get("choice") in PATHS:
             path, pconf = pa["choice"], _conf(pa)
-        out = Choice(domain, process, path, pconf, ms, event["input_tokens"], work=work)
+        out = Choice(domain, process, path, pconf, ms, event["input_tokens"], work=work,
+                     ranked=_ranked(answers, keymap))
         cached = {k: v for k, v in asdict(out).items() if k != "cached"}
     else:
         if not isinstance(answers.get("tier"), dict) or answers["tier"].get("choice") not in TIERS:
