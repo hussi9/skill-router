@@ -129,8 +129,9 @@ def test_state_has_insights(tmp_path: Path) -> None:
              "thin_names": ["gamma-skill"], "duplicates": [], "at": now}
     s = ld.aggregate(p, days=7, now=now, audit_state=audit)
     assert set(s["insights"]) == {"jev", "routing", "outcomes", "listing", "audit", "visibility"}
-    assert "2 lines" in s["insights"]["outcomes"] and s["insights"]["outcomes"].endswith("too early.")
-    assert s["confidence"]["outcomes"] == {"n": 2, "badge": "too early"}
+    assert "(1 of 2)" in s["insights"]["outcomes"] and s["insights"]["outcomes"].endswith("too early.")
+    assert s["confidence"]["outcomes"] == {"n": 2, "loads": 1, "badge": "too early"}
+    assert s["ignored_total"] == 0 and s["missed_total"] == 0
     assert s["confidence"]["jev"]["n"] == 5
     assert 1 <= len(s["actions"]) <= 6
     assert s["ignored"] == []                          # nothing shown 3 times

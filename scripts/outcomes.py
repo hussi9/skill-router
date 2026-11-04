@@ -342,6 +342,7 @@ def summarize(since_days: int = 30) -> dict:
             followed["all"] += 1
             followed[mode] += 1
     total["held_out"] = len(held)
+    total["followed"] = followed["all"]   # lines where a suggested skill was loaded
     total["followed_rate"] = followed["all"] / total["shown"] if total["shown"] else 0.0
     for m in SOURCES:
         b = modes[m]

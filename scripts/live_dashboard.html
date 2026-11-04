@@ -31,6 +31,9 @@ main{flex:1;display:grid;gap:8px;grid-template-columns:1.25fr 1fr 1fr;grid-templ
 .panel:after{bottom:-1px;right:-1px;border-width:0 1px 1px 0;border-color:var(--amber)}
 .ph{display:flex;justify-content:space-between;align-items:center;gap:8px;white-space:nowrap;border-bottom:1px solid var(--line);padding-bottom:6px}
 .ph .lbl:first-child{color:var(--hi)}
+.col1{grid-row:1/3;display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
+#sphere{flex:1 1 0;min-height:140px}
+#todo{flex:0 1 auto}   /* the list takes what it needs; the sphere gets the rest */
 #sphere canvas{flex:1;width:100%;min-height:0}
 .legend{position:absolute;right:12px;bottom:10px;display:flex;gap:12px}
 .sq{display:inline-block;width:8px;height:8px;margin-right:5px}
@@ -42,7 +45,7 @@ main{flex:1;display:grid;gap:8px;grid-template-columns:1.25fr 1fr 1fr;grid-templ
 .stat .n{font-size:22px;font-weight:700;color:var(--hi);line-height:1.1}
 .c{color:var(--cyan)!important}.am{color:var(--amber)!important}.vi{color:var(--violet)!important}.gr{color:var(--green)!important}.rd{color:var(--red)!important}.dm{color:var(--dim)!important}
 .nodata{color:var(--dim);letter-spacing:.14em;text-transform:uppercase;font-size:11px;padding:8px 0}
-#events ul{list-style:none;margin:0;padding:0;overflow:hidden;flex:1}
+#events ul{list-style:none;margin:0;padding:0;overflow:hidden;flex:1;min-height:0}
 #events li{display:grid;grid-template-columns:62px 82px 1fr auto;gap:8px;padding:3px 0;border-bottom:1px dashed rgba(28,37,51,.6);white-space:nowrap;animation:in .6s ease}
 #events li span{overflow:hidden;text-overflow:ellipsis}
 @keyframes in{from{background:rgba(79,209,232,.12)}to{background:transparent}}
@@ -71,13 +74,13 @@ svg text{font-family:var(--mono)}
 .bdg{display:inline-block;font-size:9px;letter-spacing:.1em;text-transform:uppercase;border:1px solid currentColor;padding:0 4px;margin-left:6px;line-height:14px;vertical-align:1px;white-space:nowrap}
 .bdg.too{color:var(--red)} .bdg.early{color:var(--amber)} .bdg.solid{color:var(--green)}
 #todo ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;overflow:hidden;flex:1;min-height:0}
-#todo li{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:6px;line-height:1.3}
+#todo li{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:6px;line-height:1.3;flex:none}
 #todo li>b{color:var(--amber);font-weight:700;font-size:12px}
-#todo .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#todo .tt{color:var(--hi);display:block;overflow:hidden;text-overflow:ellipsis}
-#todo .w{color:#8FA0B6;font-size:10.5px;display:block;overflow:hidden;text-overflow:ellipsis}
-#todo.compact .t{white-space:nowrap} #todo.compact .tt,#todo.compact .w{display:inline}
-#todo.compact .w:before{content:" — "}
+#todo li>div{min-width:0}
+#todo .tw{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+#todo .tt{color:var(--hi)}
+#todo .w{color:#8FA0B6;font-size:10.5px}
+#todo.compact .tw{-webkit-line-clamp:1}
 #todo code{font-family:var(--mono);font-size:10.5px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
 .im{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0}
 .im .h{margin-bottom:3px}
@@ -88,7 +91,8 @@ footer{display:flex;justify-content:space-between;color:var(--dim);font-size:10.
 @media (max-width:1100px){
   body{height:auto;min-height:100vh}
   main{grid-template-columns:1fr;grid-template-rows:auto}
-  #sphere{grid-row:auto;height:420px}
+  .col1{grid-row:auto}
+  #sphere{flex:none;height:420px}
   .row3{grid-column:auto;grid-template-columns:1fr}
 }
 </style>
@@ -106,12 +110,18 @@ footer{display:flex;justify-content:space-between;color:var(--dim);font-size:10.
 </header>
 
 <main>
+  <div class="col1">
   <section class="panel" id="sphere">
     <div class="ph"><span class="lbl">installed skills · line sphere</span><span class="lbl" id="rot">rot 0.0°</span></div>
     <div class="legend"><span class="lbl"><i class="sq" style="background:var(--amber)"></i>routed</span><span class="lbl"><i class="sq" style="background:var(--cyan)"></i>loaded</span></div>
     <canvas id="cv"></canvas>
     <div class="callout"><div class="big" id="co-big">–</div><div class="lbl" id="co-sub">–</div></div>
   </section>
+  <section class="panel" id="todo">
+    <div class="ph"><span class="lbl">do this next</span><span class="lbl" id="td-tag"></span></div>
+    <ol id="td-body"></ol>
+  </section>
+  </div>
 
   <section class="panel" id="jev">
     <div class="ph"><span class="lbl">jev · telemetry</span><span class="lbl vi" id="jev-tag"></span></div>
@@ -127,10 +137,6 @@ footer{display:flex;justify-content:space-between;color:var(--dim);font-size:10.
     <div id="oc-body"></div>
   </section>
 
-  <section class="panel" id="todo">
-    <div class="ph"><span class="lbl">do this next</span><span class="lbl" id="td-tag"></span></div>
-    <ol id="td-body"></ol>
-  </section>
 
   <section class="panel" id="routing">
     <div class="ph"><span class="lbl">routing · per day</span><span class="lbl" id="rt-tag"></span></div>
@@ -224,7 +230,10 @@ function draw(now){
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   if (cv.width !== Math.round(W*dpr) || cv.height !== Math.round(H*dpr)){ cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); }
   cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
-  const R = Math.min(W, H) * .42, ox = W > H * 1.6 ? W * .6 : W/2, oy = H/2, tilt = -.38;
+  const co = document.querySelector(".callout"), cr = co.offsetLeft + co.offsetWidth - cv.offsetLeft;
+  const R = Math.min(W, H) * .42, oy = H/2, tilt = -.38;
+  /* a short, wide panel: move the sphere right of the callout instead of under it */
+  const ox = W > H * 1.6 ? Math.min(W - R * 1.15, Math.max(W * .6, cr + R * 1.2)) : W/2;
   ang += .0018;
   $("rot").textContent = "rot " + ((ang * 180 / Math.PI) % 360).toFixed(1) + "°";
   const ca = Math.cos(ang), sa = Math.sin(ang), ct = Math.cos(tilt), st = Math.sin(tilt);
@@ -261,8 +270,11 @@ function draw(now){
   for (const [p, name, col] of labels){
     if (placed.length >= 8 || placed.some(q => Math.abs(q[0] - p[0]) < 120 && Math.abs(q[1] - p[1]) < 14)) continue;
     placed.push(p);
-    cx.strokeStyle = col; cx.globalAlpha = .6; cx.beginPath(); cx.moveTo(p[0], p[1]); cx.lineTo(p[0] + 14, p[1] - 10); cx.stroke();
-    cx.globalAlpha = 1; cx.fillStyle = col; cx.fillText(name.length > 28 ? name.slice(0, 27) + "…" : name, p[0] + 17, p[1] - 12);
+    const label = name.length > 28 ? name.slice(0, 27) + "…" : name;
+    const d = p[0] + 20 + cx.measureText(label).width > W ? -1 : 1;   /* flip left rather than clip at the edge */
+    cx.strokeStyle = col; cx.globalAlpha = .6; cx.beginPath(); cx.moveTo(p[0], p[1]); cx.lineTo(p[0] + 14 * d, p[1] - 10); cx.stroke();
+    cx.globalAlpha = 1; cx.fillStyle = col; cx.textAlign = d > 0 ? "left" : "right";
+    cx.fillText(label, p[0] + 17 * d, p[1] - 12); cx.textAlign = "left";
   }
   tick(now);
   requestAnimationFrame(draw);
@@ -333,7 +345,7 @@ function outcomes(s){
   if (!o){ $("oc-body").innerHTML = NODATA; $("oc-tag").textContent = ""; return; }
   const m = o.summary, l = o.lift, r = l.routed, h = l.held_out;
   const cf = s.confidence || {}, oconf = cf.outcomes || {}, hconf = cf.holdout || {};
-  $("oc-tag").innerHTML = esc(m.shown + " shown") + bdg(oconf.badge);
+  $("oc-tag").innerHTML = `<span title="loads of a suggested skill · lines shown">${esc((oconf.loads == null ? "–" : oconf.loads) + "/" + m.shown)}</span>` + bdg(oconf.badge);
   const lift = l.lift == null ? '<span class="dm">no data yet</span>' : num("ol", l.lift * 100, v => (v >= 0 ? "+" : "") + v.toFixed(0) + " pts", l.lift >= 0 ? "gr" : "rd");
   const rate = x => x.known ? `${x.success}/${x.known} · ${pct(x.success / x.known)}` : "no data yet";
   $("oc-body").innerHTML = `<div class="stats">
@@ -409,24 +421,31 @@ function todo(s){
   $("td-tag").textContent = a.length ? a.length + " suggested · nothing runs by itself" : "";
   if (!a.length){ $("td-body").innerHTML = `<li style="display:block">${NODATA}</li>`; return; }
   $("td-body").innerHTML = a.map((x, i) => `<li title="${esc(x.title + " — " + x.why + " — " + x.how)}"><b>${i + 1}</b><div>
-    <div class="t"><span class="tt">${esc(x.title)}</span><span class="w">${esc(x.why)}</span></div><code>${esc(x.how)}</code></div></li>`).join("");
-  fitTodo();
+    <div class="tw"><span class="tt">${esc(x.title)}</span> <span class="w">— ${esc(x.why)}</span></div><code>${esc(x.how)}</code></div></li>`).join("");
 }
 function fitTodo(){
   const p = $("todo"), ol = $("td-body");
   p.classList.remove("compact");
   if (ol.scrollHeight > ol.clientHeight + 1) p.classList.add("compact");
 }
-addEventListener("resize", fitTodo);
+function fitEvents(){
+  const ul = $("ev"), h = ul.clientHeight;
+  for (const li of ul.children) li.style.visibility = li.offsetTop - ul.offsetTop + li.offsetHeight > h + 1 ? "hidden" : "";
+}
+addEventListener("resize", () => { fitTodo(); fitEvents(); });
 function ignoredMissed(s){
   const ig = s.ignored || [], mi = s.missed || [];
   $("im-tag").textContent = "last " + s.header.days + "d";
-  $("im-ins").textContent = `${ig.length}${ig.length >= 8 ? "+" : ""} skills shown 3+ times but never loaded; ${mi.length}${mi.length >= 8 ? "+" : ""} loaded without being suggested.`;
-  const list = (rows, head, cls, val, tip) => `<div><div class="lbl h">${head}</div>` + (rows.length ? rows.slice(0, 5).map(r =>
-    `<div class="r" title="${esc(tip(r))}"><span>${esc(r.skill)}</span><span class="${cls}">${esc(val(r))}</span></div>`).join("") : '<div class="nodata">none</div>') + "</div>";
+  const igT = s.ignored_total == null ? ig.length : s.ignored_total, miT = s.missed_total == null ? mi.length : s.missed_total;
+  $("im-ins").textContent = `${igT} skills shown in 3+ lines (route + shortlist) but never loaded; ${miT} loaded first where skill-router suggested something else.`;
+  const ROWS = 5;
+  const count = (n, total) => n >= total ? `all ${total}` : `${n} of ${total}`;
+  const list = (rows, total, head, val, tip) => `<div><div class="lbl h">${head} · ${count(Math.min(ROWS, rows.length), total)}</div>` + (rows.length ? rows.slice(0, ROWS).map(r =>
+    `<div class="r" title="${esc(tip(r))}"><span>${esc(r.skill)}</span><span>${val(r)}</span></div>`).join("") : '<div class="nodata">none</div>') + "</div>";
   $("im-body").innerHTML =
-    list(ig, "ignored · shown", "am", r => r.shown + "×", r => `${r.skill}: shown ${r.shown} times, loaded 0` + (r.avg_jev == null ? "" : `, average Jev ${Number(r.avg_jev).toFixed(2)}`)) +
-    list(mi, "missed · loaded", "c", r => r.times + "×", r => `${r.skill}: loaded ${r.times} times when not suggested`);
+    list(ig, igT, "ignored", r => `<span class="am">${esc(r.card)}</span><span class="dm">+</span><span class="c">${esc(r.shortlist)}</span>`,
+         r => `${r.skill}: shown in ${r.shown} lines (${r.card} as the route, ${r.shortlist} in a shortlist), loaded 0` + (r.avg_jev == null ? "" : `, average Jev ${Number(r.avg_jev).toFixed(2)}`)) +
+    list(mi, miT, "missed", r => `<span class="c">${esc(r.times)}×</span>`, r => `${r.skill}: loaded first on ${r.times} prompts where Jev suggested something else or nothing`);
 }
 function render(s){
   if (!s) return;
@@ -434,6 +453,7 @@ function render(s){
     try { f(s); } catch (e) { console.error(f.name, e); }
   }
   $("foot").textContent = "poll 3 s · updated " + hhmmss(s.header.now);
+  fitTodo(); fitEvents();   /* after every panel is filled: row heights are final */
 }
 async function poll(){
   try {

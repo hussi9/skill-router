@@ -59,6 +59,7 @@ class Paths:
     index: Path = field(default_factory=lambda: _claude() / "skill_index.json")
     listing_dir: Path = field(default_factory=lambda: _claude() / "skill_router_cache" / "listing")
     visibility: Path = field(default_factory=lambda: _claude() / "skill_router_cache" / "visibility-summary.json")
+    catalog: Path = field(default_factory=lambda: _claude() / "skill_router_catalog.json")
 
 
 # ---- readers -------------------------------------------------------------------
@@ -361,25 +362,54 @@ def aggregate(paths: Paths, days: int, now: float, audit_state: Optional[dict] =
         "audit": audit,
         "top_skills": _top_skills(router_rows, out_rows, since),
     }
-    loads = _invoke_loads(router_rows, since)
-    ign = di.ignored(out_rows + loads, days, now=now, jev_conf=jev_conf)
-    mis = di.missed(out_rows + loads, days, now=now)
+    router_ev = _router_events(router_rows, since)
+    ign = di.ignored(out_rows + router_ev, days, now=now, jev_conf=jev_conf, limit=None)
+    mis = di.missed(out_rows + router_ev, days, now=now, limit=None)
+    state["skill_files"] = _skill_files(paths.catalog, [x["skill"] for x in ign[:1] + mis[:1]])
     state.update({"insights": di.insights(state), "actions": di.actions(state, ign, mis),
-                  "ignored": ign, "missed": mis, "confidence": di.confidence(state)})
+                  "ignored": ign[:di.LIST_MAX], "ignored_total": len(ign),
+                  "missed": mis[:di.LIST_MAX], "missed_total": len(mis),
+                  "confidence": di.confidence(state)})
     return state
 
 
-def _invoke_loads(router_rows: list[dict], since: float) -> list[dict]:
-    """Router-log Skill-tool loads in the outcomes `loaded` signal shape (per prompt)."""
+def _skill_files(catalog: Path, names: list[str]) -> dict[str, dict]:
+    """Where each named skill's SKILL.md lives (home shortened to ~), and whether a plugin owns it."""
+    want = {n for n in names if n}
+    if not want:
+        return {}
+    data = _json(catalog) or {}
+    home = str(Path.home())
+    out: dict[str, dict] = {}
+    for e in data.get("entries") or []:
+        if not isinstance(e, dict) or e.get("name") not in want or e["name"] in out:
+            continue
+        src = e.get("source_path")
+        path = None
+        if isinstance(src, str) and src:
+            path = src if src.endswith("SKILL.md") else src.rstrip("/") + "/SKILL.md"
+            path = "~" + path[len(home):] if path.startswith(home + "/") else path
+        plugin = e.get("type") == "plugin-skill" or str(e.get("source") or "").startswith("plugin")
+        out[e["name"]] = {"path": None if plugin else path, "plugin": plugin}
+    return out
+
+
+def _router_events(router_rows: list[dict], since: float) -> list[dict]:
+    """Router-log rows in outcomes shape, keys only: Skill-tool loads become `loaded` signals,
+    routed prompts become `prompt` events (the router logs one only when it did not stand down)."""
     out = []
     for e in router_rows:
-        if e.get("type") != "invoke" or not isinstance(e.get("skill"), str) or not e["skill"]:
+        typ = e.get("type")
+        if typ not in ("invoke", "prompt"):
             continue
         t = _iso_ts(e.get("ts"))
         if t is None or t < since:
             continue
-        out.append({"type": "signal", "kind": "loaded", "skill": e["skill"], "ts": t,
-                    "session_id": e.get("session_id"), "prompt_id": e.get("prompt_id")})
+        key = {"session_id": e.get("session_id"), "prompt_id": e.get("prompt_id"), "ts": t}
+        if typ == "prompt":
+            out.append({"type": "prompt", **key})
+        elif isinstance(e.get("skill"), str) and e["skill"]:
+            out.append({"type": "signal", "kind": "loaded", "skill": e["skill"], **key})
     return out
 
 

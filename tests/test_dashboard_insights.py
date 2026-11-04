@@ -27,7 +27,8 @@ def _state(shown=57, followed=5, known_routed=1, known_held=1, decisions=1795) -
         "header": {"days": 7},
         "jev": {"decisions": decisions, "route_rate": 0.52, "median_ms": 461.0, "failures": 6},
         "routing": {"cards": 15, "shortlists": 42, "silent": 72, "held_out": 3},
-        "outcomes": {"summary": {"shown": shown, "followed_rate": followed / shown if shown else 0.0,
+        "outcomes": {"summary": {"shown": shown, "followed": followed,
+                                 "followed_rate": followed / shown if shown else 0.0,
                                  "loaded_from_card": followed, "loaded_from_shortlist": 0},
                      "lift": {"routed": {"success": 0, "known": known_routed},
                               "held_out": {"success": 0, "known": known_held}, "lift": 0.0}},
@@ -50,19 +51,20 @@ def test_insight_sentences_carry_numbers_and_badges() -> None:
     for k, sentence in ins.items():
         assert re.search(r"\d", sentence), k
         assert sentence.endswith("."), k
-    assert ins["outcomes"] == ("Claude used 9% of suggested skills (5 of 57 lines): "
-                               "5 from routes, 0 from shortlists — solid.")
+    # 57 lines but only 5 loads: the badge follows the rarer side, capped at "early signal"
+    assert ins["outcomes"] == ("Claude used a suggested skill on 9% of lines (5 of 57): "
+                               "5 loads from routes, 0 from shortlists — early signal.")
     assert ins["routing"].endswith("— solid.") and "Of 132 prompts" in ins["routing"]
     assert "1,795" in ins["jev"] and "52%" in ins["jev"]
     assert "43 of 764" in ins["listing"]
-    small = di.insights(_state(shown=4, followed=1))
-    assert small["outcomes"].endswith("too early.")
-    assert di.insights(_state(shown=12, followed=3))["outcomes"].endswith("early signal.")
+    assert di.insights(_state(shown=4, followed=1))["outcomes"].endswith("too early.")
+    assert di.insights(_state(shown=57, followed=12))["outcomes"].endswith("early signal.")
+    assert di.insights(_state(shown=57, followed=40))["outcomes"].endswith("solid.")
     empty = di.insights({})
     assert all(isinstance(v, str) and v for v in empty.values())
     conf = di.confidence(_state())
     assert conf["holdout"] == {"n": 1, "badge": "too early"}
-    assert conf["outcomes"] == {"n": 57, "badge": "solid"}
+    assert conf["outcomes"] == {"n": 57, "loads": 5, "badge": "early signal"}
 
 
 def test_ignored_requires_three_shows_and_zero_loads() -> None:
@@ -79,34 +81,50 @@ def test_ignored_requires_three_shows_and_zero_loads() -> None:
     ev.append(_load("d0", "plug:delta-skill"))
     ev.append(_shown("h", card=["alpha-skill"], held_out=True))   # held out: printed nothing
     ev += [_shown(f"o{i}", card=["epsilon-skill"], ts=NOW - 30 * 86400) for i in range(5)]  # too old
+    for i in range(4):                                   # kappa: 4 shortlist-only lines
+        ev.append(_shown(f"k{i}", shortlist=["kappa-skill"]))
     conf = {("s", "a0"): 0.4, ("s", "a1"): 0.6}
     out = di.ignored(ev, 7, now=NOW, jev_conf=conf)
-    assert out == [{"skill": "alpha-skill", "shown": 3, "loaded": 0, "avg_jev": 0.5}]
+    # alpha (3 route lines) outranks kappa (4 shortlist-only lines): a shortlist mention weighs half
+    assert out == [{"skill": "alpha-skill", "shown": 3, "card": 3, "shortlist": 0, "loaded": 0, "avg_jev": 0.5},
+                   {"skill": "kappa-skill", "shown": 4, "card": 0, "shortlist": 4, "loaded": 0, "avg_jev": None}]
     many = [_shown(f"m{i}-{j}", card=[f"skill-{i}"]) for i in range(12) for j in range(3 + i)]
     big = di.ignored(many, 7, now=NOW)
     assert len(big) == 8 and big[0]["skill"] == "skill-11" and big[0]["shown"] == 14
+    assert len(di.ignored(many, 7, now=NOW, limit=None)) == 12      # true total for the page
+
+
+def _prompt(pid: str) -> dict:
+    return {"type": "prompt", "session_id": "s", "prompt_id": pid, "ts": NOW - 60}
 
 
 def test_missed_counts_loads_without_matching_suggestion() -> None:
     ev = [
         _shown("p1", card=["alpha-skill"]), _load("p1", "alpha-skill"),       # matched → not missed
         _shown("p2", shortlist=["beta-skill"]), _load("p2", "gamma-skill"),    # other skill shown
-        _load("p3", "gamma-skill"), _load("p3", "gamma-skill"),               # nothing shown; once per prompt
+        _prompt("p3"), _load("p3", "gamma-skill"), _load("p3", "gamma-skill"),  # routed silently
         _shown("p4", card=[], shortlist=[]), _load("p4", "delta-skill"),       # silent line
         _shown("p5", held_out=True), _load("p5", "zeta-skill"),               # held out → excluded
         _shown("p6", card=["eta-skill"]), _load("p6", "plug:eta-skill"),       # prefix match
+        _load("p8", "lambda-skill"),                                           # router stood down (/command)
+        _prompt("p9"), _load("p9", "gamma-skill", ts=NOW - 50),                # first load counts…
+        _load("p9", "mu-skill", ts=NOW - 40),                                  # …the chained one does not
         _load("", "theta-skill"),                                              # no prompt id
         _load("p7", "iota-skill", ts=NOW - 30 * 86400),                        # too old
     ]
-    assert di.missed(ev, 7, now=NOW) == [{"skill": "gamma-skill", "times": 2},
+    assert di.missed(ev, 7, now=NOW) == [{"skill": "gamma-skill", "times": 3},
                                          {"skill": "delta-skill", "times": 1}]
+    assert len(di.missed(ev, 7, now=NOW, limit=1)) == 1
 
 
 def test_actions_ranked_and_capped() -> None:
-    ign = [{"skill": "alpha-skill", "shown": 11, "loaded": 0, "avg_jev": 0.43},
-           {"skill": "beta-skill", "shown": 6, "loaded": 0, "avg_jev": None}]
+    ign = [{"skill": "plug:alpha-skill", "shown": 11, "card": 2, "shortlist": 9, "loaded": 0, "avg_jev": 0.43},
+           {"skill": "beta-skill", "shown": 6, "card": 6, "shortlist": 0, "loaded": 0, "avg_jev": None}]
     mis = [{"skill": "gamma-skill", "times": 4}, {"skill": "delta-skill", "times": 2}]
-    acts = di.actions(_state(shown=4, followed=1), ign, mis)
+    st = _state(shown=4, followed=1)
+    st["skill_files"] = {"plug:alpha-skill": {"path": None, "plugin": True},
+                         "gamma-skill": {"path": "~/skills/gamma-skill/SKILL.md", "plugin": False}}
+    acts = di.actions(st, ign, mis)
     assert 1 <= len(acts) <= 6
     weights = [a["weight"] for a in acts]
     assert weights == sorted(weights, reverse=True)
@@ -114,14 +132,28 @@ def test_actions_ranked_and_capped() -> None:
         assert set(a) == {"title", "why", "how", "weight"}
         assert a["title"] and a["why"] and a["how"]
     titles = " | ".join(a["title"] for a in acts)
-    assert acts[0]["title"].startswith("Keep using it ~")          # 4 lines: too early beats all
-    assert "alpha-skill" in titles and "gamma-skill" in titles
+    assert acts[0]["title"].startswith("Keep using it")              # 4 lines: too early beats all
+    assert "unknown (fewer than 2 samples)" in acts[0]["title"]      # 1 load is no rate
     assert "beta-skill" not in titles and "delta-skill" not in titles   # one per list; the panel has the rest
+    ig = next(a for a in acts if "alpha-skill" in a["title"])
+    assert "11 lines (2 as the route, 9 in a shortlist)" in ig["why"]
+    assert ig["how"].startswith("plugin skill — hide it per project (skillOverrides)")
+    mi = next(a for a in acts if "gamma-skill" in a["title"])
+    assert mi["why"] == "Jev didn't suggest gamma-skill on 4 prompts where you loaded it first."
+    assert mi["how"] == "improve the description in ~/skills/gamma-skill/SKILL.md"
+    assert not any("epsilon-skill" in a["title"]
+                   for a in di.actions(st, [], [{"skill": "epsilon-skill", "times": 1}]))   # N >= 2 only
     dup = next(a for a in acts if "duplicate" in a["title"])
     assert "gamma-skill ~ plug:gamma-skill" in dup["why"] and "cli.py audit" in dup["how"]
     thin = next(a for a in acts if "short skill description" in a["title"])
     assert "alpha-skill" in thin["how"] and "+23 more" in thin["how"]
-    solid = di.actions(_state(shown=57, known_routed=20, known_held=20), [], [])
+    early = di.actions(_state(shown=57, followed=5), [], [])
+    assert any(a["title"] == "Keep using it: ~7 more days to 10 loads" for a in early)
+    slow_state = _state(shown=57, followed=12)
+    slow_state["header"]["days"] = 30                               # 12 loads in 30 days
+    slow = di.actions(slow_state, [], [])
+    assert any(a["title"] == "Keep using it: 30+ days to 30 loads" for a in slow)
+    solid = di.actions(_state(shown=57, followed=30, known_routed=20, known_held=20), [], [])
     assert not any(a["title"].startswith(("Keep using", "Holdout")) for a in solid)
     assert any("168 skills unused" in a["title"] and "cli.py audit" in a["how"] for a in solid)
     assert di.actions({}, [], []) and len(di.actions({}, [], [])) <= 6

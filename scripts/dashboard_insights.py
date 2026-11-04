@@ -27,6 +27,7 @@ IGNORED_MIN_SHOWN = 3
 LIST_MAX = 8
 ACTIONS_MAX = 6
 PER_SKILL_ACTIONS = 1     # top ignored and top missed skill only; the panel lists the rest
+MISSED_MIN = 2            # a missed skill earns a to-do only after 2 first loads
 AUDIT_CMD = "python3 scripts/cli.py audit"
 NAME_MAX = 80
 
@@ -87,23 +88,29 @@ def _join(names: list[str], limit: int = 3, total: Optional[int] = None) -> str:
 # ---- ignored / missed -----------------------------------------------------------
 
 def ignored(events: Iterable[dict], days: int, min_shown: int = IGNORED_MIN_SHOWN,
-            now: Optional[float] = None, jev_conf: Optional[dict] = None) -> list[dict]:
-    """Skills shown on >= min_shown printed lines and loaded 0 times in the window.
+            now: Optional[float] = None, jev_conf: Optional[dict] = None,
+            limit: Optional[int] = LIST_MAX) -> list[dict]:
+    """Skills shown in >= min_shown printed lines and loaded 0 times in the window.
 
-    shown counts non-held-out `shown` events naming the skill in card or shortlist;
+    shown counts non-held-out `shown` lines naming the skill; card counts the lines where
+    it was the route, shortlist the lines where it was only in the shortlist. A shortlist
+    mention is a weaker suggestion, so ranking weighs it half (card + shortlist / 2).
     loaded counts `loaded` signals for the skill on any prompt (a plugin prefix is ignored:
-    "plugin:x" loaded counts for a shown "x"). avg_jev is the mean
-    Jev confidence of the prompts that showed it (None when unknown). Most-shown first, max 8.
+    "plugin:x" loaded counts for a shown "x"). avg_jev is the mean Jev confidence of the
+    prompts that showed it (None when unknown). limit=None returns every row.
     """
     rows = _window(events, days, now)
-    shown: dict[str, int] = {}
+    card: dict[str, int] = {}
+    short: dict[str, int] = {}
     confs: dict[str, list[float]] = {}
     loaded: dict[str, int] = {}
     for e in rows:
         if e.get("type") == "shown" and not e.get("held_out"):
             c = (jev_conf or {}).get(_key(e))
-            for n in set(_names(e.get("card")) + _names(e.get("shortlist"))):
-                shown[n] = shown.get(n, 0) + 1
+            cs = set(_names(e.get("card")))
+            for n in cs | set(_names(e.get("shortlist"))):
+                bucket = card if n in cs else short
+                bucket[n] = bucket.get(n, 0) + 1
                 if _n(c) is not None:
                     confs.setdefault(n, []).append(float(c))
         elif e.get("type") == "signal" and e.get("kind") == "loaded":
@@ -111,37 +118,45 @@ def ignored(events: Iterable[dict], days: int, min_shown: int = IGNORED_MIN_SHOW
             if n:
                 loaded[_bare(n)] = loaded.get(_bare(n), 0) + 1
     out = []
-    for n, k in shown.items():
-        if k >= min_shown and not loaded.get(_bare(n)):
+    for n in set(card) | set(short):
+        c, sl = card.get(n, 0), short.get(n, 0)
+        if c + sl >= min_shown and not loaded.get(_bare(n)):
             cs = confs.get(n) or []
-            out.append({"skill": n, "shown": k, "loaded": 0,
+            out.append({"skill": n, "shown": c + sl, "card": c, "shortlist": sl, "loaded": 0,
                         "avg_jev": round(sum(cs) / len(cs), 2) if cs else None})
-    out.sort(key=lambda x: (-x["shown"], x["skill"]))
-    return out[:LIST_MAX]
+    out.sort(key=lambda x: (-(x["card"] + x["shortlist"] / 2), -x["shown"], x["skill"]))
+    return out if limit is None else out[:limit]
 
 
-def missed(events: Iterable[dict], days: int, now: Optional[float] = None) -> list[dict]:
-    """Skills Claude loaded on a prompt where skill-router showed nothing or only other skills.
+def missed(events: Iterable[dict], days: int, now: Optional[float] = None,
+           limit: Optional[int] = LIST_MAX) -> list[dict]:
+    """Skills Claude loaded first on a prompt where skill-router suggested other skills or nothing.
 
-    Each (prompt, skill) load counts once. Held-out prompts are left out (nothing was
-    printed on purpose), as are loads without a prompt id. A plugin prefix is ignored when
-    matching a load to the names shown. Most frequent first, max 8.
+    Only prompts skill-router actually routed count: they carry a router `prompt` event or a
+    `shown` event. A typed /skill command or the escape hatch makes the router stand down
+    before it logs either, so those prompts drop out. Only the first load of each prompt
+    counts — later loads are usually one skill chaining into another. Held-out prompts are
+    left out (nothing was printed on purpose), as are loads without a prompt id. A plugin
+    prefix is ignored when matching a load to the names shown. limit=None returns every row.
     """
     rows = _window(events, days, now)
     shown: dict[tuple, dict] = {}
+    routed: set[tuple] = set()
     for e in rows:
         if e.get("type") == "shown":
             shown[_key(e)] = e
-    seen: set[tuple] = set()
-    times: dict[str, int] = {}
+            routed.add(_key(e))
+        elif e.get("type") == "prompt":
+            routed.add(_key(e))
+    first: dict[tuple, tuple[float, str]] = {}
     for e in rows:
         if e.get("type") != "signal" or e.get("kind") != "loaded" or not e.get("prompt_id"):
             continue
-        n = _name(e.get("skill"))
-        k = _key(e)
-        if not n or (k, n) in seen:
-            continue
-        seen.add((k, n))
+        n, k, t = _name(e.get("skill")), _key(e), _n(e.get("ts")) or 0.0
+        if n and k in routed and (k not in first or t < first[k][0]):
+            first[k] = (t, n)
+    times: dict[str, int] = {}
+    for k, (_, n) in first.items():
         s = shown.get(k)
         if s is not None and s.get("held_out"):
             continue
@@ -150,10 +165,13 @@ def missed(events: Iterable[dict], days: int, now: Optional[float] = None) -> li
         times[n] = times.get(n, 0) + 1
     out = [{"skill": n, "times": t} for n, t in times.items()]
     out.sort(key=lambda x: (-x["times"], x["skill"]))
-    return out[:LIST_MAX]
+    return out if limit is None else out[:limit]
 
 
 # ---- confidence -----------------------------------------------------------------
+
+_ORDER = ("too early", "early signal", "solid")
+
 
 def _holdout_n(state: dict) -> int:
     lift = ((state.get("outcomes") or {}).get("lift")) or {}
@@ -162,18 +180,30 @@ def _holdout_n(state: dict) -> int:
     return min(r, h)
 
 
+def _loads(summary: dict) -> int:
+    return _i(summary.get("loaded_from_card")) + _i(summary.get("loaded_from_shortlist"))
+
+
+def _outcomes_badge(shown: int, loads: int) -> str:
+    """A follow rate rests on its rarer side: the loads. Under 10 loads it is at best an early signal."""
+    if loads >= EARLY_AT:
+        return badge(min(shown, loads))
+    return _ORDER[min(_ORDER.index(badge(shown)), 1)]
+
+
 def confidence(state: dict) -> dict:
-    """Per metric: the sample it rests on and its badge."""
+    """Per metric: the sample it rests on and its badge (outcomes: lines and loads)."""
     jev = state.get("jev") or {}
     rt = state.get("routing") or {}
     oc = ((state.get("outcomes") or {}).get("summary")) or {}
-    ns = {
+    out = {k: {"n": n, "badge": badge(n)} for k, n in {
         "jev": _i(jev.get("decisions")),
         "routing": sum(_i(rt.get(k)) for k in ("cards", "shortlists", "silent", "held_out")),
-        "outcomes": _i(oc.get("shown")),
         "holdout": _holdout_n(state),
-    }
-    return {k: {"n": n, "badge": badge(n)} for k, n in ns.items()}
+    }.items()}
+    shown, loads = _i(oc.get("shown")), _loads(oc)
+    out["outcomes"] = {"n": shown, "loads": loads, "badge": _outcomes_badge(shown, loads)}
+    return out
 
 
 # ---- insights -------------------------------------------------------------------
@@ -210,9 +240,9 @@ def _outcomes_sentence(o: Optional[dict]) -> str:
     m = o.get("summary") or {}
     n = _i(m.get("shown"))
     card, short = _i(m.get("loaded_from_card")), _i(m.get("loaded_from_shortlist"))
-    rate = _n(m.get("followed_rate")) or 0.0
-    return (f"Claude used {round(rate * 100)}% of suggested skills ({round(rate * n)} of {n} lines): "
-            f"{card} from routes, {short} from shortlists — {badge(n)}.")
+    followed = _i(m.get("followed")) if m.get("followed") is not None else card + short
+    return (f"Claude used a suggested skill on {_pct(followed, n)} of lines ({followed} of {n}): "
+            f"{card} load{'s' if card != 1 else ''} from routes, {short} from shortlists — {_outcomes_badge(n, card + short)}.")
 
 
 def _listing_sentence(L: Optional[dict]) -> str:
@@ -252,12 +282,30 @@ def insights(state: dict) -> dict[str, str]:
 
 # ---- actions --------------------------------------------------------------------
 
-def _days_to(n: int, target: int, days: int) -> Optional[int]:
-    """Days until n reaches target at the window's rate; None when nothing was collected."""
-    if n <= 0:
-        return None
-    rate = n / max(1, days)
-    return max(1, round((target - n) / rate))
+DAYS_CAP = 30
+PLUGIN_IGNORED = "plugin skill — hide it per project (skillOverrides) or report upstream"
+PLUGIN_MISSED = "plugin skill — its description lives upstream; report the gap there"
+
+
+def _days_to(n: int, target: int, days: int) -> str:
+    """How long until n reaches target at the window's rate, in words.
+
+    Fewer than 2 samples is no rate at all; beyond 30 days the estimate is too loose to state.
+    """
+    if n < 2:
+        return "unknown (fewer than 2 samples)"
+    more = max(1, round((target - n) / (n / max(1, days))))
+    return f"{DAYS_CAP}+ days" if more > DAYS_CAP else f"~{more} more days"
+
+
+def _edit_step(name: str, state: dict, what: str, plugin_step: str = PLUGIN_IGNORED) -> str:
+    """Where to make the change: the real SKILL.md for user/project skills; plugins are not ours to edit."""
+    f = (state.get("skill_files") or {}).get(name) or {}
+    if f.get("plugin") or (not f and ":" in name):
+        return plugin_step
+    if f.get("path"):
+        return f"{what} in {f['path']}"
+    return f"{what} in its SKILL.md (find it with {AUDIT_CMD})"
 
 
 def actions(state: dict, ignored_list: list[dict], missed_list: list[dict]) -> list[dict]:
@@ -268,16 +316,17 @@ def actions(state: dict, ignored_list: list[dict], missed_list: list[dict]) -> l
 
     for x in ignored_list[:PER_SKILL_ACTIONS]:
         jev = f", average Jev confidence {x['avg_jev']:.2f}" if x.get("avg_jev") is not None else ""
+        c, sl = _i(x.get("card")), _i(x.get("shortlist", x.get("shown")))
         out.append({"title": f"Check why {x['skill']} is never loaded",
-                    "why": (f"Shown {x['shown']} times, loaded 0{jev}; its description may not "
-                            "match, or it's a routing miss."),
-                    "how": f"edit the description in {x['skill']}/SKILL.md, or review in {AUDIT_CMD}",
-                    "weight": 50 + x["shown"]})
-    for x in missed_list[:PER_SKILL_ACTIONS]:
-        out.append({"title": f"Help Jev find {x['skill']}",
-                    "why": (f"Claude loaded it {x['times']} time{'s' if x['times'] != 1 else ''} "
-                            "on prompts where skill-router suggested something else or nothing."),
-                    "how": f"improve the description in {x['skill']}/SKILL.md",
+                    "why": (f"Shown in {c + sl} lines ({c} as the route, {sl} in a shortlist), "
+                            f"loaded 0{jev}; its description may not match, or it's a routing miss."),
+                    "how": _edit_step(x["skill"], state, "check the description"),
+                    "weight": 50 + c + sl / 2})
+    for x in [m for m in missed_list if _i(m.get("times")) >= MISSED_MIN][:PER_SKILL_ACTIONS]:
+        out.append({"title": f"Check the description of {x['skill']}",
+                    "why": (f"Jev didn't suggest {x['skill']} on {x['times']} prompts where you "
+                            "loaded it first."),
+                    "how": _edit_step(x["skill"], state, "improve the description", PLUGIN_MISSED),
                     "weight": 45 + 5 * x["times"]})
 
     dupes = [d for d in (a.get("duplicates") or []) if isinstance(d, (list, tuple)) and len(d) == 2]
@@ -310,19 +359,17 @@ def actions(state: dict, ignored_list: list[dict], missed_list: list[dict]) -> l
                     "weight": 30 + min(unused, 200) * 0.05})
 
     conf = confidence(state)
-    oc = conf["outcomes"]["n"]
-    if oc < SOLID_AT:
-        more = _days_to(oc, SOLID_AT, days)
-        when = f"~{more} more days" if more else "a few more days"
-        out.append({"title": f"Keep using it {when}",
-                    "why": f"Only {oc} suggestion lines so far — {badge(oc)}; 30 are needed for a solid follow rate.",
+    loads = conf["outcomes"]["loads"]
+    if loads < SOLID_AT:
+        target = EARLY_AT if loads < EARLY_AT else SOLID_AT
+        out.append({"title": f"Keep using it: {_days_to(loads, target, days)} to {target} loads",
+                    "why": (f"The follow rate rests on only {loads} load{'s' if loads != 1 else ''} of a "
+                            f"suggested skill; {EARLY_AT} are the minimum to read it, {SOLID_AT} to call it solid."),
                     "how": "nothing to run; the numbers fill in as you work",
-                    "weight": 70 if oc < EARLY_AT else 38})
+                    "weight": 70 if conf["outcomes"]["n"] < EARLY_AT else 38})
     ho = conf["holdout"]["n"]
     if ho < EARLY_AT:
-        more = _days_to(ho, EARLY_AT, days)
-        when = f"~{more} more days" if more else "until tests run on held-out prompts"
-        out.append({"title": f"Holdout lift needs {when}",
+        out.append({"title": f"Holdout lift needs time: {_days_to(ho, EARLY_AT, days)}",
                     "why": (f"Only {ho} held-out prompt{'s' if ho != 1 else ''} with a test result "
                             f"— too early; 10 are needed before the lift means anything."),
                     "how": "keep running tests in your sessions; check back in python3 scripts/cli.py stats",

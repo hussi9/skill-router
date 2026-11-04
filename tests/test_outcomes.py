@@ -103,7 +103,7 @@ class TestFollowed(OutcomesCase):
         summary = outcomes.summarize()
         self.assertEqual(set(summary), {"shown", "loaded_from_card", "loaded_from_shortlist",
                                         "followed_rate", "tests_green_after",
-                                        "corrections_after", "by_mode", "held_out"})
+                                        "corrections_after", "by_mode", "held_out", "followed"})
         jev, keyless = summary["by_mode"]["jev"], summary["by_mode"]["keyless"]
         self.assertEqual((jev["shown"], jev["loaded_from_card"], jev["tests_green_after"]), (1, 1, 1))
         self.assertAlmostEqual(jev["followed_rate"], 1.0)
