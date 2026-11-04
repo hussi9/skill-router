@@ -364,7 +364,13 @@ def main(argv: list[str]) -> int:
     ap_v.add_argument("--names-free", action="store_true", help="assume skill names do not count toward the budget")
     ap_v.add_argument("--context-tokens", type=int, default=200_000)
     ap_v.add_argument("--force", action="store_true", help="apply even if the plan is not worthwhile")
+    ap_d = sub.add_parser("dashboard", help="live local dashboard at http://127.0.0.1:PORT (Ctrl-C stops it)")
+    ap_d.add_argument("--port", type=int, default=8790)
+    ap_d.add_argument("--days", type=int, default=7)
     args = ap.parse_args(argv)
+    if args.cmd == "dashboard":
+        import live_dashboard
+        return live_dashboard.serve(args.port, max(1, args.days))
     if args.cmd == "listing":
         import listing_probe
         proj = Path(args.project).expanduser() if args.project else Path.cwd()

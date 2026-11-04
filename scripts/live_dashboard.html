@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SKILL-ROUTER · LIVE</title>
+<style>
+:root{
+  --bg:#05070B; --panel:#080B11; --line:#1C2533; --dim:#5B6B80; --text:#C9D4E3; --hi:#EAF2FF;
+  --cyan:#4FD1E8; --amber:#F5B841; --violet:#A78BFA; --green:#4ADE80; --red:#F43F5E;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px}
+body{height:100vh;display:flex;flex-direction:column;padding:14px 18px 10px;gap:10px}
+.lbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.lbl b{color:var(--text);font-weight:500}
+header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid var(--line);padding-bottom:10px}
+.brand{display:flex;flex-direction:column;gap:6px}
+.crumb{font-size:13px;letter-spacing:.16em;color:var(--text);text-transform:uppercase}
+.crumb:before{content:"";display:inline-block;width:3px;height:12px;background:var(--cyan);margin-right:10px;vertical-align:-1px}
+.title{font-size:24px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.title .a{color:var(--amber)} .title .v{color:var(--violet)} .title .x{color:var(--dim);font-size:16px;margin:0 8px}
+.meta{text-align:right;display:flex;flex-direction:column;gap:6px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px;box-shadow:0 0 8px var(--green)}
+.dot.idle{background:var(--dim);box-shadow:none}
+main{flex:1;display:grid;gap:10px;grid-template-columns:1.25fr 1fr 1fr;grid-template-rows:minmax(0,1.15fr) minmax(0,1fr) auto;min-height:0}
+.panel{border:1px solid var(--line);background:var(--panel);position:relative;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+.panel:before,.panel:after{content:"";position:absolute;width:6px;height:6px;border-color:var(--cyan);border-style:solid;opacity:.7}
+.panel:before{top:-1px;left:-1px;border-width:1px 0 0 1px}
+.panel:after{bottom:-1px;right:-1px;border-width:0 1px 1px 0;border-color:var(--amber)}
+.ph{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:6px}
+.ph .lbl:first-child{color:var(--hi)}
+#sphere{grid-row:1/3}
+#sphere canvas{flex:1;width:100%;min-height:0}
+.legend{position:absolute;right:12px;top:34px;display:flex;gap:12px}
+.sq{display:inline-block;width:8px;height:8px;margin-right:5px}
+.callout{position:absolute;left:14px;bottom:14px;border:1px solid var(--cyan);background:rgba(5,7,11,.85);padding:8px 12px;box-shadow:0 0 18px rgba(79,209,232,.18)}
+.callout .big{color:var(--cyan);font-size:15px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.kv{display:grid;grid-template-columns:1fr auto;row-gap:5px;column-gap:10px;align-items:baseline}
+.kv .n{font-size:13px;color:var(--hi);text-align:right}
+.stats{display:flex;gap:18px}
+.stat .n{font-size:24px;font-weight:700;color:var(--hi);line-height:1.1}
+.c{color:var(--cyan)!important}.am{color:var(--amber)!important}.vi{color:var(--violet)!important}.gr{color:var(--green)!important}.rd{color:var(--red)!important}.dm{color:var(--dim)!important}
+.nodata{color:var(--dim);letter-spacing:.14em;text-transform:uppercase;font-size:11px;padding:8px 0}
+#events ul{list-style:none;margin:0;padding:0;overflow:hidden;flex:1}
+#events li{display:grid;grid-template-columns:62px 82px 1fr auto;gap:8px;padding:3px 0;border-bottom:1px dashed rgba(28,37,51,.6);white-space:nowrap;animation:in .6s ease}
+#events li span{overflow:hidden;text-overflow:ellipsis}
+@keyframes in{from{background:rgba(79,209,232,.12)}to{background:transparent}}
+svg text{font-family:var(--mono)}
+.meter{display:flex;gap:2px;height:12px}
+.meter i{flex:1;background:#13202B}
+.meter i.on{background:var(--amber)}
+.meter i.cy{background:var(--cyan)}
+.row3{grid-column:1/4;display:grid;grid-template-columns:1.1fr .9fr 1.2fr .9fr;gap:10px}
+.bars .b{display:grid;grid-template-columns:minmax(0,1fr) 110px 34px;gap:8px;align-items:center;padding:2px 0}
+.bars .b span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bars .track{height:6px;background:#101822;position:relative}
+.bars .track i{position:absolute;left:0;top:0;bottom:0;background:var(--amber)}
+.bars .track i.ld{background:var(--cyan);opacity:.85}
+.chart{flex:1;min-height:56px;display:flex;align-items:flex-end;gap:4px;position:relative;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.chart .col{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;position:relative}
+.chart .col i{display:block;width:100%;min-height:0}
+.chart .stack{flex-direction:column-reverse;justify-content:flex-start}
+.chart .stack b{position:absolute;bottom:-14px;left:0;right:0;text-align:center;font-weight:400;font-size:9px;color:var(--dim)}
+.gatezone{position:absolute;left:80%;right:0;top:0;bottom:14px;background:rgba(74,222,128,.07)}
+.gateline{position:absolute;left:80%;top:-4px;bottom:14px;border-left:1px dashed var(--amber)}
+.gateline span{position:absolute;right:6px;top:0;color:var(--amber);font-size:10px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
+.axis{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-between;color:var(--dim);font-size:9px}
+footer{display:flex;justify-content:space-between;color:var(--dim);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase}
+@media (max-width:1100px){
+  body{height:auto;min-height:100vh}
+  main{grid-template-columns:1fr;grid-template-rows:auto}
+  #sphere{grid-row:auto;height:420px}
+  .row3{grid-column:auto;grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="crumb">skill-router / live mission control</div>
+    <div class="title"><span class="a">SKILL-ROUTER <span id="ver"></span></span><span class="x">✦</span><span class="v">JEV</span></div>
+  </div>
+  <div class="meta">
+    <div class="lbl">nodes <b id="h-nodes">–</b> · gate <b>0.80</b> · window <b id="h-days">–</b></div>
+    <div class="lbl"><span class="dot idle" id="live"></span><span id="h-live">connecting</span> · last activity <b id="h-last">–</b></div>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="sphere">
+    <div class="ph"><span class="lbl">installed skills · line sphere</span><span class="lbl" id="rot">rot 0.0°</span></div>
+    <div class="legend"><span class="lbl"><i class="sq" style="background:var(--amber)"></i>routed</span><span class="lbl"><i class="sq" style="background:var(--cyan)"></i>loaded</span></div>
+    <canvas id="cv"></canvas>
+    <div class="callout"><div class="big" id="co-big">–</div><div class="lbl" id="co-sub">–</div></div>
+  </section>
+
+  <section class="panel" id="jev">
+    <div class="ph"><span class="lbl">jev · telemetry</span><span class="lbl vi" id="jev-tag"></span></div>
+    <div id="jev-body"></div>
+    <div id="hist" class="chart"></div>
+  </section>
+
+  <section class="panel" id="events">
+    <div class="ph"><span class="lbl">live events · router log</span><span class="lbl gr" id="ev-tag">stream</span></div>
+    <ul id="ev"></ul>
+  </section>
+
+  <section class="panel" id="routing">
+    <div class="ph"><span class="lbl">routing · per day</span><span class="lbl" id="rt-tag"></span></div>
+    <div id="rt-body"></div>
+    <div id="days" class="chart"></div>
+  </section>
+
+  <section class="panel" id="outcomes">
+    <div class="ph"><span class="lbl">outcomes · holdout lift</span><span class="lbl" id="oc-tag"></span></div>
+    <div id="oc-body"></div>
+  </section>
+
+  <div class="row3">
+    <section class="panel" id="listing">
+      <div class="ph"><span class="lbl">skill listing · budget</span><span class="lbl" id="ls-tag"></span></div>
+      <div id="ls-body"></div>
+    </section>
+    <section class="panel" id="audit">
+      <div class="ph"><span class="lbl">skill doctor · audit</span><span class="lbl" id="au-tag"></span></div>
+      <div id="au-body"></div>
+    </section>
+    <section class="panel" id="top">
+      <div class="ph"><span class="lbl">top skills · routed / loaded</span><span class="lbl" id="tp-tag"></span></div>
+      <div id="tp-body" class="bars"></div>
+    </section>
+    <section class="panel" id="vis">
+      <div class="ph"><span class="lbl">visibility · plans</span><span class="lbl" id="vs-tag"></span></div>
+      <div id="vs-body"></div>
+    </section>
+  </div>
+</main>
+<footer><span>source: local logs · read-only · 127.0.0.1</span><span id="foot">poll 3 s</span></footer>
+
+<script id="boot" type="application/json">/*__STATE__*/null</script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const NODATA = '<div class="nodata">no data yet</div>';
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function pct(x){ return x == null ? "–" : Math.round(x * 100) + "%"; }
+function ago(s){ if (s == null) return "–"; s = Math.max(0, s); if (s < 90) return Math.round(s) + "s"; if (s < 5400) return Math.round(s/60) + "m"; if (s < 172800) return Math.round(s/3600) + "h"; return Math.round(s/86400) + "d"; }
+function hhmmss(t){ const d = new Date(t * 1000); return d.toTimeString().slice(0, 8); }
+function compact(n){ return n >= 1e6 ? (n/1e6).toFixed(1) + "M" : n >= 1e3 ? (n/1e3).toFixed(1) + "K" : String(Math.round(n)); }
+
+/* numbers animate between polls: <span data-n="key"> keeps its last value */
+const tweens = {};
+function num(key, value, fmt, cls){
+  const prev = tweens[key] ? tweens[key].to : value;
+  tweens[key] = {from: prev, to: value, t0: performance.now(), fmt: fmt || (v => Math.round(v).toLocaleString())};
+  return `<span class="${cls || ""}" data-n="${esc(key)}">${esc(tweens[key].fmt(prev))}</span>`;
+}
+function tick(now){
+  for (const el of document.querySelectorAll("[data-n]")){
+    const tw = tweens[el.dataset.n]; if (!tw) continue;
+    const k = Math.min(1, (now - tw.t0) / 700), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = tw.fmt(tw.from + (tw.to - tw.from) * e);
+  }
+}
+
+/* ---------- sphere ---------- */
+const cv = $("cv"), cx = cv.getContext("2d");
+let nodes = [], arcs = [], lit = {}, ang = 0, nodeCount = -1;
+function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash(s){ let h = 2166136261; for (let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function build(n){
+  nodeCount = n; nodes = []; arcs = [];
+  const r = rng(764 + n), N = Math.max(n, 1), g = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < N; i++){
+    const y = 1 - (i + .5) / N * 2, rad = Math.sqrt(1 - y*y), th = g * i;
+    nodes.push([Math.cos(th) * rad, y, Math.sin(th) * rad]);
+  }
+  const A = Math.min(420, Math.max(60, n));
+  const pal = ["#4FD1E8","#4FD1E8","#9FE9F5","#EAF2FF","#F5B841","#A78BFA"];
+  for (let i = 0; i < A; i++){
+    const a = nodes[Math.floor(r() * N)], b = nodes[Math.floor(r() * N)];
+    arcs.push({a, b, c: pal[Math.floor(r() * pal.length)], w: .35 + r() * .9, al: .10 + r() * .32});
+  }
+}
+function slerp(a, b, t){
+  let d = a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; d = Math.max(-.999, Math.min(.999, d));
+  const o = Math.acos(d), s = Math.sin(o) || 1, k1 = Math.sin((1-t)*o)/s, k2 = Math.sin(t*o)/s;
+  return [a[0]*k1 + b[0]*k2, a[1]*k1 + b[1]*k2, a[2]*k1 + b[2]*k2];
+}
+function draw(now){
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W*dpr) || cv.height !== Math.round(H*dpr)){ cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); }
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
+  const R = Math.min(W, H) * .42, ox = W/2, oy = H/2, tilt = -.38;
+  ang += .0018;
+  $("rot").textContent = "rot " + ((ang * 180 / Math.PI) % 360).toFixed(1) + "°";
+  const ca = Math.cos(ang), sa = Math.sin(ang), ct = Math.cos(tilt), st = Math.sin(tilt);
+  const P = p => { const x = p[0]*ca + p[2]*sa, z = -p[0]*sa + p[2]*ca, y = p[1]*ct - z*st, z2 = p[1]*st + z*ct; return [ox + x*R, oy + y*R, z2]; };
+  cx.strokeStyle = "#1C2533"; cx.lineWidth = 1;
+  cx.beginPath(); cx.arc(ox, oy, R * 1.04, 0, Math.PI*2); cx.stroke();
+  for (let i = 0; i < 72; i++){ const a = i / 72 * Math.PI * 2, r1 = R*1.06, r2 = R*(i % 6 ? 1.09 : 1.13);
+    cx.beginPath(); cx.moveTo(ox + Math.cos(a)*r1, oy + Math.sin(a)*r1); cx.lineTo(ox + Math.cos(a)*r2, oy + Math.sin(a)*r2); cx.stroke(); }
+  cx.globalCompositeOperation = "lighter";
+  for (const s of arcs){
+    cx.strokeStyle = s.c; cx.lineWidth = s.w; cx.beginPath();
+    for (let k = 0; k <= 16; k++){
+      const q = slerp(s.a, s.b, k/16), lift = 1 + .08 * Math.sin(Math.PI * k / 16), p = P([q[0]*lift, q[1]*lift, q[2]*lift]);
+      cx.globalAlpha = s.al * (.45 + .55 * (p[2] + 1) / 2);
+      k ? cx.lineTo(p[0], p[1]) : cx.moveTo(p[0], p[1]);
+    }
+    cx.stroke();
+  }
+  cx.globalAlpha = 1;
+  for (const p0 of nodes){ const p = P(p0); cx.fillStyle = `rgba(201,212,227,${.12 + .35 * (p[2] + 1) / 2})`; cx.fillRect(p[0] - .7, p[1] - .7, 1.4, 1.4); }
+  cx.globalCompositeOperation = "source-over";
+  const labels = [];
+  const pulse = .6 + .4 * Math.sin(now / 380);
+  for (const [name, kind] of Object.entries(lit)){
+    if (!nodes.length) break;
+    const p = P(nodes[hash(name) % nodes.length]), col = kind === "loaded" ? "#4FD1E8" : "#F5B841";
+    cx.shadowColor = col; cx.shadowBlur = 14 * pulse; cx.fillStyle = col;
+    cx.beginPath(); cx.arc(p[0], p[1], 2.6 + 1.6 * pulse * (p[2] > 0 ? 1 : .5), 0, Math.PI*2); cx.fill();
+    cx.shadowBlur = 0;
+    if (p[2] > -.1) labels.push([p, name, col]);
+  }
+  cx.font = "10px " + getComputedStyle(document.body).fontFamily;
+  const placed = [];
+  for (const [p, name, col] of labels){
+    if (placed.length >= 8 || placed.some(q => Math.abs(q[0] - p[0]) < 120 && Math.abs(q[1] - p[1]) < 14)) continue;
+    placed.push(p);
+    cx.strokeStyle = col; cx.globalAlpha = .6; cx.beginPath(); cx.moveTo(p[0], p[1]); cx.lineTo(p[0] + 14, p[1] - 10); cx.stroke();
+    cx.globalAlpha = 1; cx.fillStyle = col; cx.fillText(name.length > 28 ? name.slice(0, 27) + "…" : name, p[0] + 17, p[1] - 12);
+  }
+  tick(now);
+  requestAnimationFrame(draw);
+}
+
+/* ---------- panels ---------- */
+function header(s){
+  const h = s.header;
+  $("ver").textContent = h.version ? "v" + h.version : "";
+  $("h-nodes").innerHTML = num("nodes", h.installed);
+  $("h-days").textContent = h.days + "d";
+  const age = h.last_activity ? h.now - h.last_activity : null;
+  $("h-last").textContent = age == null ? "no data yet" : ago(age) + " ago";
+  $("live").className = "dot" + (age != null && age < 600 ? "" : " idle");
+  $("h-live").textContent = age != null && age < 600 ? "live" : "idle";
+  if (nodeCount !== h.installed) build(h.installed);
+  lit = s.recent_skills || {};
+  const n = Object.keys(lit).length;
+  $("co-big").textContent = h.installed ? h.installed + " skills installed" : "no data yet";
+  $("co-sub").textContent = n ? `${n} lit · recently routed or loaded` : "nothing routed recently";
+}
+function jev(s){
+  const j = s.jev;
+  if (!j){ $("jev-body").innerHTML = NODATA; $("hist").innerHTML = ""; $("jev-tag").textContent = ""; return; }
+  $("jev-tag").textContent = j.decisions.toLocaleString() + " decisions";
+  const ms = v => v == null ? "–" : v >= 1000 ? (v/1000).toFixed(1) + " s" : Math.round(v) + " ms";
+  $("jev-body").innerHTML = `<div class="kv">
+    <span class="lbl">decisions</span><span class="n">${num("jd", j.decisions)}</span>
+    <span class="lbl">cache hit rate</span><span class="n c">${num("jc", j.cache_hit_rate, pct)}</span>
+    <span class="lbl">latency median · p90</span><span class="n">${num("jm", j.median_ms || 0, () => ms(j.median_ms))} · ${num("jp", j.p90_ms || 0, () => ms(j.p90_ms))}</span>
+    <span class="lbl">confidence ≥ 0.80 → route</span><span class="n am">${j.route_rate == null ? "–" : num("jr", j.route_rate, pct)}</span>
+    <span class="lbl">timeouts / failures</span><span class="n ${j.failures ? "rd" : "dm"}">${num("jf", j.failures)}</span></div>`;
+  const h = j.histogram, mx = Math.max(1, ...h);
+  $("hist").innerHTML = `<div class="gatezone"></div><div class="gateline"><span>gate 0.80</span></div>` +
+    h.map((v, i) => `<div class="col" title="${(i/10).toFixed(1)}–${((i+1)/10).toFixed(1)}: ${v}"><i style="height:${v / mx * 100}%;background:${i >= 8 ? "var(--green)" : "var(--cyan)"};opacity:${i >= 8 ? .9 : .55}"></i></div>`).join("") +
+    `<div class="axis"><span>0.0</span><span>0.5</span><span>1.0</span></div>`;
+}
+const KIND = {route:["route","am"], shortlist:["shortlist","c"], silent:["silent","dm"], held_out:["held out","vi"], loaded:["loaded","c"], tests_green:["tests ✓","gr"], tests_red:["tests ✗","rd"]};
+let lastTop = null;
+function events(s){
+  const ev = s.events || [];
+  if (!ev.length){ $("ev").innerHTML = `<li style="display:block">${NODATA}</li>`; $("ev-tag").textContent = ""; return; }
+  $("ev-tag").textContent = "● stream";
+  const fresh = lastTop == null ? Infinity : lastTop;
+  $("ev").innerHTML = ev.map(e => {
+    const k = KIND[e.kind] || [e.kind, ""], right = e.jev_conf != null ? "jev " + Number(e.jev_conf).toFixed(2) : (e.mode || "");
+    return `<li style="${e.ts > fresh ? "" : "animation:none"}"><span class="dm">${esc(hhmmss(e.ts))}</span><span class="${k[1]}">${esc(k[0])}</span><span>${esc(e.skills.length ? e.skills.join(", ") : "· nothing added")}</span><span class="dm">${esc(right)}</span></li>`;
+  }).join("");
+  lastTop = ev[0].ts;
+}
+function routing(s){
+  const r = s.routing;
+  if (!r){ $("rt-body").innerHTML = NODATA; $("days").innerHTML = ""; $("rt-tag").textContent = ""; return; }
+  $("rt-tag").textContent = "last " + s.header.days + "d";
+  $("rt-body").innerHTML = `<div class="stats">
+    <div class="stat"><div class="lbl">cards</div><div class="n am">${num("rc", r.cards)}</div></div>
+    <div class="stat"><div class="lbl">shortlists</div><div class="n c">${num("rs", r.shortlists)}</div></div>
+    <div class="stat"><div class="lbl">silent</div><div class="n">${num("rq", r.silent)}</div></div>
+    <div class="stat"><div class="lbl">held out</div><div class="n vi">${num("rh", r.held_out)}</div></div></div>`;
+  const d = r.per_day, mx = Math.max(1, ...d.map(x => x.cards + x.shortlists + x.silent + x.held_out));
+  const COL = [["cards","var(--amber)"],["shortlists","var(--cyan)"],["held_out","var(--violet)"],["silent","#2A3A4F"]];
+  $("days").innerHTML = d.map(x => `<div class="col stack" title="${esc(x.day)}: ${COL.map(([k]) => k + " " + x[k]).join(", ")}">` +
+    COL.map(([k, c]) => `<i style="height:${x[k] / mx * 100}%;background:${c}"></i>`).join("") +
+    `<b>${esc(x.day.slice(5))}</b></div>`).join("");
+}
+function outcomes(s){
+  const o = s.outcomes;
+  if (!o){ $("oc-body").innerHTML = NODATA; $("oc-tag").textContent = ""; return; }
+  const m = o.summary, l = o.lift, r = l.routed, h = l.held_out;
+  $("oc-tag").textContent = m.shown + " shown";
+  const lift = l.lift == null ? '<span class="dm">no data yet</span>' : num("ol", l.lift * 100, v => (v >= 0 ? "+" : "") + v.toFixed(0) + " pts", l.lift >= 0 ? "gr" : "rd");
+  const rate = x => x.known ? `${x.success}/${x.known} · ${pct(x.success / x.known)}` : "no data yet";
+  $("oc-body").innerHTML = `<div class="stats">
+    <div class="stat"><div class="lbl">followed</div><div class="n gr">${num("of", m.followed_rate, pct)}</div></div>
+    <div class="stat"><div class="lbl">from card</div><div class="n am">${num("oa", m.loaded_from_card)}</div></div>
+    <div class="stat"><div class="lbl">from shortlist</div><div class="n c">${num("ob", m.loaded_from_shortlist)}</div></div></div>
+    <div class="kv" style="margin-top:6px">
+    <span class="lbl">tests green after a line</span><span class="n gr">${num("og", m.tests_green_after)}</span>
+    <span class="lbl">corrections after a line</span><span class="n ${m.corrections_after ? "rd" : "dm"}">${num("oc", m.corrections_after)}</span>
+    <span class="lbl">held out (nothing printed)</span><span class="n vi">${num("oh", m.held_out)}</span>
+    <span class="lbl">routed success · known turns</span><span class="n">${esc(rate(r))}</span>
+    <span class="lbl">held-out success · known turns</span><span class="n">${esc(rate(h))}</span>
+    <span class="lbl">holdout lift</span><span class="n">${lift}</span>
+    <span class="lbl">median line length</span><span class="n">${o.median_chars == null ? "–" : esc(Math.round(o.median_chars) + " chars")}</span></div>`;
+}
+function listing(s){
+  const L = s.listing;
+  if (!L){ $("ls-body").innerHTML = NODATA + '<div class="lbl">run: cli.py listing measure</div>'; $("ls-tag").textContent = ""; return; }
+  $("ls-tag").innerHTML = L.fresh ? `<span class="dm">${esc(ago(L.age_s))} old</span>` : '<span class="rd">stale</span>';
+  const segs = 40, on = L.entries ? Math.max(L.described ? 1 : 0, Math.round(segs * L.described / L.entries)) : 0;
+  const share = L.context_window ? (L.skills_tok / L.context_window * 100).toFixed(1) + "% of " + compact(L.context_window) + " context" : "";
+  $("ls-body").innerHTML = `<div class="stats">
+    <div class="stat"><div class="lbl">listed</div><div class="n c">${num("le", L.entries)}</div></div>
+    <div class="stat"><div class="lbl">described</div><div class="n am">${num("ld", L.described)}</div></div>
+    <div class="stat"><div class="lbl">name-only</div><div class="n">${num("ln", L.name_only)}</div></div></div>
+    <div class="meter">${Array.from({length: segs}, (_, i) => `<i class="${i < on ? "on" : "cy"}" style="${i < on ? "" : "opacity:.35"}"></i>`).join("")}</div>
+    <div class="lbl am">${esc(share)}${share ? " · " : ""}~${esc(compact(L.skills_tok))} tokens</div>`;
+}
+function audit(s){
+  const a = s.audit;
+  if (!a){ $("au-body").innerHTML = '<div class="nodata">no data yet · audit runs in the background</div>'; $("au-tag").textContent = ""; return; }
+  $("au-tag").textContent = ago(a.age_s) + " ago";
+  const C = 2 * Math.PI * 34, v = Math.max(0, Math.min(100, a.score)), col = v >= 75 ? "#4ADE80" : v >= 50 ? "#F5B841" : "#F43F5E";
+  $("au-body").innerHTML = `<div style="display:flex;gap:14px;align-items:center">
+    <svg viewBox="0 0 90 90" width="96" height="96"><circle cx="45" cy="45" r="34" fill="none" stroke="#13202B" stroke-width="9"/>
+      <circle cx="45" cy="45" r="34" fill="none" stroke="${col}" stroke-width="9" stroke-dasharray="${C*v/100} ${C}" transform="rotate(-90 45 45)"/>
+      <text x="45" y="47" text-anchor="middle" fill="#EAF2FF" font-size="20" font-weight="700">${esc(Math.round(v))}</text>
+      <text x="45" y="60" text-anchor="middle" fill="#5B6B80" font-size="7" letter-spacing="1">SCORE</text></svg>
+    <div class="kv" style="flex:1">
+      <span class="lbl">routable skills</span><span class="n">${num("as", a.skills)}</span>
+      <span class="lbl">unused 90d</span><span class="n am">${num("au", a.unused)}</span>
+      <span class="lbl">overlaps</span><span class="n vi">${num("ao", a.overlaps)}</span>
+      <span class="lbl">thin descriptions</span><span class="n c">${num("at", a.thin)}</span></div></div>`;
+}
+function topSkills(s){
+  const t = s.top_skills || [];
+  if (!t.length){ $("tp-body").innerHTML = NODATA; $("tp-tag").textContent = ""; return; }
+  $("tp-tag").textContent = "last " + s.header.days + "d";
+  const mx = Math.max(1, ...t.map(x => x.routed + x.loaded));
+  $("tp-body").innerHTML = t.slice(0, 7).map(x => `<div class="b"><span title="${esc(x.name)}">${esc(x.name)}</span>
+    <span class="track"><i style="width:${(x.routed + x.loaded) / mx * 100}%"></i><i class="ld" style="width:${x.loaded / mx * 100}%"></i></span>
+    <span class="n" style="text-align:right">${esc(x.routed + x.loaded)}</span></div>`).join("");
+}
+function vis(s){
+  const v = s.visibility;
+  if (!v){ $("vs-body").innerHTML = NODATA; $("vs-tag").textContent = ""; return; }
+  $("vs-tag").textContent = v.age_s == null ? "" : ago(v.age_s) + " old";
+  $("vs-body").innerHTML = `<div class="kv">
+    <span class="lbl">projects planned</span><span class="n">${num("vp", v.projects)}</span>
+    <span class="lbl">plans worth applying</span><span class="n gr">${num("vw", v.worthwhile)}</span>
+    <span class="lbl">unused skills</span><span class="n am">${num("vu", v.unused_skills)}</span></div>`;
+}
+function render(s){
+  if (!s) return;
+  for (const f of [header, jev, events, routing, outcomes, listing, audit, topSkills, vis]){
+    try { f(s); } catch (e) { console.error(f.name, e); }
+  }
+  $("foot").textContent = "poll 3 s · updated " + hhmmss(s.header.now);
+}
+async function poll(){
+  try {
+    const r = await fetch("/api/state", {cache: "no-store"});
+    if (r.ok) render(await r.json()); else $("h-live").textContent = "error " + r.status;
+  } catch (e) { $("h-live").textContent = "server offline"; $("live").className = "dot idle"; }
+  setTimeout(poll, 3000);
+}
+render(JSON.parse($("boot").textContent));
+requestAnimationFrame(draw);
+setTimeout(poll, 3000);
+</script>
+</body>
+</html>
