@@ -6,6 +6,24 @@
 
 A hook-driven router for Claude Code. It indexes every skill you have installed by *when it applies*, ranks them against each prompt in ~80 ms, asks a small model only when the ranking is unsure, and injects a route card before Claude's first action. Enforcement is tiered: hard where a wrong skill is expensive, soft everywhere else. The route follows every sub-agent you dispatch.
 
+## Live dashboard
+
+See routing decisions, loaded skills, ignored suggestions and suggested next steps in one local view.
+
+![Skill Router live dashboard showing installed skills, routing activity and suggested next steps](assets/skill-router-dashboard.gif)
+
+[Watch or download the 11-second dashboard video (MP4)](assets/skill-router-dashboard.mp4).
+The recording shows one local setup; its counts are observations, not a performance benchmark.
+
+Run from the repository root:
+
+```bash
+python3 scripts/cli.py dashboard
+```
+
+Open `http://127.0.0.1:8790`. The dashboard reads local logs and refreshes as you work.
+Optional model-based routing has its own data flow; see [Jev and privacy](docs/jev.md).
+
 ```
 > my macbook restarted again last night, can you check why
 [skill-router] This is a BROKEN task — 2-step chain.
