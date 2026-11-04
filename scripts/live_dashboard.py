@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dashboard_insights as di  # noqa: E402
 import listing_probe  # noqa: E402
 import outcomes as outcomes_mod  # noqa: E402
 
@@ -345,7 +346,7 @@ def aggregate(paths: Paths, days: int, now: float, audit_state: Optional[dict] =
     if audit_state:
         audit = {**audit_state, "age_s": max(0.0, now - audit_state.get("at", now))}
         audit.pop("at", None)
-    return {
+    state = {
         "header": {"version": _version(), "installed": _installed(paths.index), "days": days,
                    "now": now, "gate": GATE,
                    "last_activity": max(last_router, (events[0]["ts"] if events else 0.0),
@@ -360,16 +361,64 @@ def aggregate(paths: Paths, days: int, now: float, audit_state: Optional[dict] =
         "audit": audit,
         "top_skills": _top_skills(router_rows, out_rows, since),
     }
+    loads = _invoke_loads(router_rows, since)
+    ign = di.ignored(out_rows + loads, days, now=now, jev_conf=jev_conf)
+    mis = di.missed(out_rows + loads, days, now=now)
+    state.update({"insights": di.insights(state), "actions": di.actions(state, ign, mis),
+                  "ignored": ign, "missed": mis, "confidence": di.confidence(state)})
+    return state
+
+
+def _invoke_loads(router_rows: list[dict], since: float) -> list[dict]:
+    """Router-log Skill-tool loads in the outcomes `loaded` signal shape (per prompt)."""
+    out = []
+    for e in router_rows:
+        if e.get("type") != "invoke" or not isinstance(e.get("skill"), str) or not e["skill"]:
+            continue
+        t = _iso_ts(e.get("ts"))
+        if t is None or t < since:
+            continue
+        out.append({"type": "signal", "kind": "loaded", "skill": e["skill"], "ts": t,
+                    "session_id": e.get("session_id"), "prompt_id": e.get("prompt_id")})
+    return out
+
+
+def _thin_names(skills: list[dict]) -> list[str]:
+    """Routable skills whose description has too few distinct words to match well."""
+    import index_match
+    import skill_audit as sa
+    return sorted(e["name"] for e in skills
+                  if len(set(index_match.tokenize(sa._desc(e)))) < sa.KEYWORD_OVERLAP_MIN_TOKENS
+                  and sa.SAFE_NAME.fullmatch(e["name"]))
+
+
+def _jev_duplicates(names: set[str], labels: Path) -> list[list[str]]:
+    """Installed pairs Jev already judged to do the same job (cached overlap labels, no call)."""
+    import skill_audit as sa
+    out: list[list[str]] = []
+    for e in _jsonl(labels):
+        a, b, p = e.get("a"), e.get("b"), _num(e.get("jev"))
+        if (isinstance(a, str) and isinstance(b, str) and a in names and b in names
+                and p is not None and p >= sa.JEV_OVERLAP_AT
+                and sa.SAFE_NAME.fullmatch(a) and sa.SAFE_NAME.fullmatch(b)):
+            pair = sorted([a, b])
+            if pair not in out:
+                out.append(pair)
+    return out
 
 
 def run_audit() -> dict:
-    """Skill doctor without Jev (no network); summary counts only."""
+    """Skill doctor without Jev (no network); counts plus the names the to-do list needs."""
+    import calibrate_overlap
     import skill_audit
     catalog, usage, history_days, outs, skills_sh = skill_audit.load_inputs()
     r = skill_audit.audit(catalog, usage, history_days, outs, skills_sh, jev=None)
+    skills = skill_audit._routable(catalog)
     return {"score": r.score, "skills": r.skills, "unused": len(r.unused_90d),
             "overlaps": len(r.overlaps), "thin": r.thin_descriptions,
-            "flagged": len(r.flagged), "at": time.time()}
+            "flagged": len(r.flagged), "thin_names": _thin_names(skills)[:20],
+            "duplicates": _jev_duplicates({e["name"] for e in skills}, calibrate_overlap.labels_path()),
+            "at": time.time()}
 
 
 # ---- page ----------------------------------------------------------------------

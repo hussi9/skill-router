@@ -30,5 +30,5 @@ Same logs as the dashboard (verified 2026-11-03): outcomes `shown` events carry 
 - `/api/state` gains `insights`, `actions`, `ignored`, `missed`, `confidence` (per metric n + badge).
 - Page: one muted sentence under every panel title; new "DO THIS NEXT" panel (numbered, title + one-line why + how in monospace); new "IGNORED / MISSED" panel (two short lists with counts); holdout/outcome numbers carry their badge. Replace a lower-value panel (e.g. visibility) to keep one screen.
 
-- [ ] Tests: `test_badge_thresholds`, `test_insight_sentences_carry_numbers_and_badges`, `test_ignored_requires_three_shows_and_zero_loads`, `test_missed_counts_loads_without_matching_suggestion`, `test_actions_ranked_and_capped`, `test_state_has_insights`, `test_no_prompt_text`.
-- [ ] Implement → run live → Playwright screenshots at both sizes (read them) → `bash scripts/check.sh` → commit "Make the dashboard say what the numbers mean and what to do next".
+- [x] Tests: `test_badge_thresholds`, `test_insight_sentences_carry_numbers_and_badges`, `test_ignored_requires_three_shows_and_zero_loads`, `test_missed_counts_loads_without_matching_suggestion`, `test_actions_ranked_and_capped`, `test_state_has_insights`, `test_no_prompt_text`.
+- [x] Implement → run live → Playwright screenshots at both sizes (read them) → `bash scripts/check.sh` → commit "Make the dashboard say what the numbers mean and what to do next".

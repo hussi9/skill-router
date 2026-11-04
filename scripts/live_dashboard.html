@@ -12,7 +12,7 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:12px}
-body{height:100vh;display:flex;flex-direction:column;padding:14px 18px 10px;gap:10px}
+body{height:100vh;display:flex;flex-direction:column;padding:12px 18px 8px;gap:8px}
 .lbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .lbl b{color:var(--text);font-weight:500}
 header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:1px solid var(--line);padding-bottom:10px}
@@ -24,23 +24,22 @@ header{display:flex;justify-content:space-between;align-items:flex-end;border-bo
 .meta{text-align:right;display:flex;flex-direction:column;gap:6px}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px;box-shadow:0 0 8px var(--green)}
 .dot.idle{background:var(--dim);box-shadow:none}
-main{flex:1;display:grid;gap:10px;grid-template-columns:1.25fr 1fr 1fr;grid-template-rows:minmax(0,1.15fr) minmax(0,1fr) auto;min-height:0}
-.panel{border:1px solid var(--line);background:var(--panel);position:relative;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden}
+main{flex:1;display:grid;gap:8px;grid-template-columns:1.25fr 1fr 1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr) auto;min-height:0}
+.panel{border:1px solid var(--line);background:var(--panel);position:relative;padding:8px 12px;display:flex;flex-direction:column;gap:6px;min-height:0;overflow:hidden}
 .panel:before,.panel:after{content:"";position:absolute;width:6px;height:6px;border-color:var(--cyan);border-style:solid;opacity:.7}
 .panel:before{top:-1px;left:-1px;border-width:1px 0 0 1px}
 .panel:after{bottom:-1px;right:-1px;border-width:0 1px 1px 0;border-color:var(--amber)}
-.ph{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:6px}
+.ph{display:flex;justify-content:space-between;align-items:center;gap:8px;white-space:nowrap;border-bottom:1px solid var(--line);padding-bottom:6px}
 .ph .lbl:first-child{color:var(--hi)}
-#sphere{grid-row:1/3}
 #sphere canvas{flex:1;width:100%;min-height:0}
-.legend{position:absolute;right:12px;top:34px;display:flex;gap:12px}
+.legend{position:absolute;right:12px;bottom:10px;display:flex;gap:12px}
 .sq{display:inline-block;width:8px;height:8px;margin-right:5px}
 .callout{position:absolute;left:14px;bottom:14px;border:1px solid var(--cyan);background:rgba(5,7,11,.85);padding:8px 12px;box-shadow:0 0 18px rgba(79,209,232,.18)}
 .callout .big{color:var(--cyan);font-size:15px;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
-.kv{display:grid;grid-template-columns:1fr auto;row-gap:5px;column-gap:10px;align-items:baseline}
+.kv{display:grid;grid-template-columns:1fr auto;row-gap:3px;column-gap:10px;align-items:baseline}
 .kv .n{font-size:13px;color:var(--hi);text-align:right}
 .stats{display:flex;gap:18px}
-.stat .n{font-size:24px;font-weight:700;color:var(--hi);line-height:1.1}
+.stat .n{font-size:22px;font-weight:700;color:var(--hi);line-height:1.1}
 .c{color:var(--cyan)!important}.am{color:var(--amber)!important}.vi{color:var(--violet)!important}.gr{color:var(--green)!important}.rd{color:var(--red)!important}.dm{color:var(--dim)!important}
 .nodata{color:var(--dim);letter-spacing:.14em;text-transform:uppercase;font-size:11px;padding:8px 0}
 #events ul{list-style:none;margin:0;padding:0;overflow:hidden;flex:1}
@@ -52,8 +51,8 @@ svg text{font-family:var(--mono)}
 .meter i{flex:1;background:#13202B}
 .meter i.on{background:var(--amber)}
 .meter i.cy{background:var(--cyan)}
-.row3{grid-column:1/4;display:grid;grid-template-columns:1.1fr .9fr 1.2fr .9fr;gap:10px}
-.bars .b{display:grid;grid-template-columns:minmax(0,1fr) 110px 34px;gap:8px;align-items:center;padding:2px 0}
+.row3{grid-column:1/4;display:grid;grid-template-columns:1fr .95fr 1fr 1.1fr;gap:8px}
+.bars .b{display:grid;grid-template-columns:minmax(0,1fr) 72px 26px;gap:8px;align-items:center;padding:2px 0}
 .bars .b span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bars .track{height:6px;background:#101822;position:relative}
 .bars .track i{position:absolute;left:0;top:0;bottom:0;background:var(--amber)}
@@ -67,6 +66,24 @@ svg text{font-family:var(--mono)}
 .gateline{position:absolute;left:80%;top:-4px;bottom:14px;border-left:1px dashed var(--amber)}
 .gateline span{position:absolute;right:6px;top:0;color:var(--amber);font-size:10px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
 .axis{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-between;color:var(--dim);font-size:9px}
+.ins{font-size:10.5px;line-height:1.35;color:#8FA0B6;margin-top:-2px}
+.ins:empty{display:none}
+.bdg{display:inline-block;font-size:9px;letter-spacing:.1em;text-transform:uppercase;border:1px solid currentColor;padding:0 4px;margin-left:6px;line-height:14px;vertical-align:1px;white-space:nowrap}
+.bdg.too{color:var(--red)} .bdg.early{color:var(--amber)} .bdg.solid{color:var(--green)}
+#todo ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;overflow:hidden;flex:1;min-height:0}
+#todo li{display:grid;grid-template-columns:18px minmax(0,1fr);column-gap:6px;line-height:1.3}
+#todo li>b{color:var(--amber);font-weight:700;font-size:12px}
+#todo .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#todo .tt{color:var(--hi);display:block;overflow:hidden;text-overflow:ellipsis}
+#todo .w{color:#8FA0B6;font-size:10.5px;display:block;overflow:hidden;text-overflow:ellipsis}
+#todo.compact .t{white-space:nowrap} #todo.compact .tt,#todo.compact .w{display:inline}
+#todo.compact .w:before{content:" — "}
+#todo code{font-family:var(--mono);font-size:10.5px;color:var(--cyan);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.im{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:0}
+.im .h{margin-bottom:3px}
+.im .r{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;padding:1px 0}
+.im .r span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vline{margin-top:4px}
 footer{display:flex;justify-content:space-between;color:var(--dim);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase}
 @media (max-width:1100px){
   body{height:auto;min-height:100vh}
@@ -98,42 +115,56 @@ footer{display:flex;justify-content:space-between;color:var(--dim);font-size:10.
 
   <section class="panel" id="jev">
     <div class="ph"><span class="lbl">jev · telemetry</span><span class="lbl vi" id="jev-tag"></span></div>
+    <div class="ins" id="jev-ins"></div>
     <div id="jev-body"></div>
     <div id="hist" class="chart"></div>
   </section>
+
+
+  <section class="panel" id="outcomes">
+    <div class="ph"><span class="lbl">outcomes · holdout lift</span><span class="lbl" id="oc-tag"></span></div>
+    <div class="ins" id="oc-ins"></div>
+    <div id="oc-body"></div>
+  </section>
+
+  <section class="panel" id="todo">
+    <div class="ph"><span class="lbl">do this next</span><span class="lbl" id="td-tag"></span></div>
+    <ol id="td-body"></ol>
+  </section>
+
+  <section class="panel" id="routing">
+    <div class="ph"><span class="lbl">routing · per day</span><span class="lbl" id="rt-tag"></span></div>
+    <div class="ins" id="rt-ins"></div>
+    <div id="rt-body"></div>
+    <div id="days" class="chart"></div>
+  </section>
+
 
   <section class="panel" id="events">
     <div class="ph"><span class="lbl">live events · router log</span><span class="lbl gr" id="ev-tag">stream</span></div>
     <ul id="ev"></ul>
   </section>
 
-  <section class="panel" id="routing">
-    <div class="ph"><span class="lbl">routing · per day</span><span class="lbl" id="rt-tag"></span></div>
-    <div id="rt-body"></div>
-    <div id="days" class="chart"></div>
-  </section>
-
-  <section class="panel" id="outcomes">
-    <div class="ph"><span class="lbl">outcomes · holdout lift</span><span class="lbl" id="oc-tag"></span></div>
-    <div id="oc-body"></div>
-  </section>
-
   <div class="row3">
     <section class="panel" id="listing">
       <div class="ph"><span class="lbl">skill listing · budget</span><span class="lbl" id="ls-tag"></span></div>
+      <div class="ins" id="ls-ins"></div>
       <div id="ls-body"></div>
+      <div id="vs-body" class="vline"></div>
     </section>
     <section class="panel" id="audit">
       <div class="ph"><span class="lbl">skill doctor · audit</span><span class="lbl" id="au-tag"></span></div>
+      <div class="ins" id="au-ins"></div>
       <div id="au-body"></div>
     </section>
     <section class="panel" id="top">
       <div class="ph"><span class="lbl">top skills · routed / loaded</span><span class="lbl" id="tp-tag"></span></div>
       <div id="tp-body" class="bars"></div>
     </section>
-    <section class="panel" id="vis">
-      <div class="ph"><span class="lbl">visibility · plans</span><span class="lbl" id="vs-tag"></span></div>
-      <div id="vs-body"></div>
+    <section class="panel" id="ignored">
+      <div class="ph"><span class="lbl">ignored / missed</span><span class="lbl" id="im-tag"></span></div>
+      <div class="ins" id="im-ins"></div>
+      <div id="im-body" class="im"></div>
     </section>
   </div>
 </main>
@@ -193,7 +224,7 @@ function draw(now){
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   if (cv.width !== Math.round(W*dpr) || cv.height !== Math.round(H*dpr)){ cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); }
   cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
-  const R = Math.min(W, H) * .42, ox = W/2, oy = H/2, tilt = -.38;
+  const R = Math.min(W, H) * .42, ox = W > H * 1.6 ? W * .6 : W/2, oy = H/2, tilt = -.38;
   ang += .0018;
   $("rot").textContent = "rot " + ((ang * 180 / Math.PI) % 360).toFixed(1) + "°";
   const ca = Math.cos(ang), sa = Math.sin(ang), ct = Math.cos(tilt), st = Math.sin(tilt);
@@ -301,7 +332,8 @@ function outcomes(s){
   const o = s.outcomes;
   if (!o){ $("oc-body").innerHTML = NODATA; $("oc-tag").textContent = ""; return; }
   const m = o.summary, l = o.lift, r = l.routed, h = l.held_out;
-  $("oc-tag").textContent = m.shown + " shown";
+  const cf = s.confidence || {}, oconf = cf.outcomes || {}, hconf = cf.holdout || {};
+  $("oc-tag").innerHTML = esc(m.shown + " shown") + bdg(oconf.badge);
   const lift = l.lift == null ? '<span class="dm">no data yet</span>' : num("ol", l.lift * 100, v => (v >= 0 ? "+" : "") + v.toFixed(0) + " pts", l.lift >= 0 ? "gr" : "rd");
   const rate = x => x.known ? `${x.success}/${x.known} · ${pct(x.success / x.known)}` : "no data yet";
   $("oc-body").innerHTML = `<div class="stats">
@@ -314,7 +346,7 @@ function outcomes(s){
     <span class="lbl">held out (nothing printed)</span><span class="n vi">${num("oh", m.held_out)}</span>
     <span class="lbl">routed success · known turns</span><span class="n">${esc(rate(r))}</span>
     <span class="lbl">held-out success · known turns</span><span class="n">${esc(rate(h))}</span>
-    <span class="lbl">holdout lift</span><span class="n">${lift}</span>
+    <span class="lbl">holdout lift${bdg(hconf.badge)}</span><span class="n">${lift}</span>
     <span class="lbl">median line length</span><span class="n">${o.median_chars == null ? "–" : esc(Math.round(o.median_chars) + " chars")}</span></div>`;
 }
 function listing(s){
@@ -336,7 +368,7 @@ function audit(s){
   $("au-tag").textContent = ago(a.age_s) + " ago";
   const C = 2 * Math.PI * 34, v = Math.max(0, Math.min(100, a.score)), col = v >= 75 ? "#4ADE80" : v >= 50 ? "#F5B841" : "#F43F5E";
   $("au-body").innerHTML = `<div style="display:flex;gap:14px;align-items:center">
-    <svg viewBox="0 0 90 90" width="96" height="96"><circle cx="45" cy="45" r="34" fill="none" stroke="#13202B" stroke-width="9"/>
+    <svg viewBox="0 0 90 90" width="80" height="80"><circle cx="45" cy="45" r="34" fill="none" stroke="#13202B" stroke-width="9"/>
       <circle cx="45" cy="45" r="34" fill="none" stroke="${col}" stroke-width="9" stroke-dasharray="${C*v/100} ${C}" transform="rotate(-90 45 45)"/>
       <text x="45" y="47" text-anchor="middle" fill="#EAF2FF" font-size="20" font-weight="700">${esc(Math.round(v))}</text>
       <text x="45" y="60" text-anchor="middle" fill="#5B6B80" font-size="7" letter-spacing="1">SCORE</text></svg>
@@ -356,17 +388,49 @@ function topSkills(s){
     <span class="n" style="text-align:right">${esc(x.routed + x.loaded)}</span></div>`).join("");
 }
 function vis(s){
-  const v = s.visibility;
-  if (!v){ $("vs-body").innerHTML = NODATA; $("vs-tag").textContent = ""; return; }
-  $("vs-tag").textContent = v.age_s == null ? "" : ago(v.age_s) + " old";
-  $("vs-body").innerHTML = `<div class="kv">
-    <span class="lbl">projects planned</span><span class="n">${num("vp", v.projects)}</span>
-    <span class="lbl">plans worth applying</span><span class="n gr">${num("vw", v.worthwhile)}</span>
-    <span class="lbl">unused skills</span><span class="n am">${num("vu", v.unused_skills)}</span></div>`;
+  const v = s.visibility, el = $("vs-body");
+  el.title = (s.insights || {}).visibility || "";
+  if (!v){ el.innerHTML = '<div class="lbl">visibility plans · no data yet</div>'; return; }
+  el.innerHTML = `<div class="lbl">visibility plans <b>${num("vw", v.worthwhile)}</b>/<b>${num("vp", v.projects)}</b> worth applying · <b class="am">${num("vu", v.unused_skills)}</b> unused${v.age_s == null ? "" : " · " + esc(ago(v.age_s))}</div>`;
+}
+function bdg(b){
+  if (!b) return "";
+  const c = b === "solid" ? "solid" : b === "early signal" ? "early" : "too";
+  return `<span class="bdg ${c}">${esc(b)}</span>`;
+}
+function insights(s){
+  const i = s.insights || {};
+  for (const [k, id] of [["jev","jev-ins"],["routing","rt-ins"],["outcomes","oc-ins"],["listing","ls-ins"],["audit","au-ins"]]){
+    $(id).textContent = i[k] || "";
+  }
+}
+function todo(s){
+  const a = s.actions || [];
+  $("td-tag").textContent = a.length ? a.length + " suggested · nothing runs by itself" : "";
+  if (!a.length){ $("td-body").innerHTML = `<li style="display:block">${NODATA}</li>`; return; }
+  $("td-body").innerHTML = a.map((x, i) => `<li title="${esc(x.title + " — " + x.why + " — " + x.how)}"><b>${i + 1}</b><div>
+    <div class="t"><span class="tt">${esc(x.title)}</span><span class="w">${esc(x.why)}</span></div><code>${esc(x.how)}</code></div></li>`).join("");
+  fitTodo();
+}
+function fitTodo(){
+  const p = $("todo"), ol = $("td-body");
+  p.classList.remove("compact");
+  if (ol.scrollHeight > ol.clientHeight + 1) p.classList.add("compact");
+}
+addEventListener("resize", fitTodo);
+function ignoredMissed(s){
+  const ig = s.ignored || [], mi = s.missed || [];
+  $("im-tag").textContent = "last " + s.header.days + "d";
+  $("im-ins").textContent = `${ig.length}${ig.length >= 8 ? "+" : ""} skills shown 3+ times but never loaded; ${mi.length}${mi.length >= 8 ? "+" : ""} loaded without being suggested.`;
+  const list = (rows, head, cls, val, tip) => `<div><div class="lbl h">${head}</div>` + (rows.length ? rows.slice(0, 5).map(r =>
+    `<div class="r" title="${esc(tip(r))}"><span>${esc(r.skill)}</span><span class="${cls}">${esc(val(r))}</span></div>`).join("") : '<div class="nodata">none</div>') + "</div>";
+  $("im-body").innerHTML =
+    list(ig, "ignored · shown", "am", r => r.shown + "×", r => `${r.skill}: shown ${r.shown} times, loaded 0` + (r.avg_jev == null ? "" : `, average Jev ${Number(r.avg_jev).toFixed(2)}`)) +
+    list(mi, "missed · loaded", "c", r => r.times + "×", r => `${r.skill}: loaded ${r.times} times when not suggested`);
 }
 function render(s){
   if (!s) return;
-  for (const f of [header, jev, events, routing, outcomes, listing, audit, topSkills, vis]){
+  for (const f of [header, insights, jev, events, todo, routing, outcomes, listing, audit, topSkills, vis, ignoredMissed]){
     try { f(s); } catch (e) { console.error(f.name, e); }
   }
   $("foot").textContent = "poll 3 s · updated " + hhmmss(s.header.now);

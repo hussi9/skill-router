@@ -122,6 +122,37 @@ def test_no_prompt_text_in_state(tmp_path: Path) -> None:
     assert "sha256" not in blob and "tokens" not in blob
 
 
+def test_state_has_insights(tmp_path: Path) -> None:
+    now = time.time()
+    p = _fixture(tmp_path, now)
+    audit = {"score": 70, "skills": 3, "unused": 1, "overlaps": 0, "thin": 1, "flagged": 0,
+             "thin_names": ["gamma-skill"], "duplicates": [], "at": now}
+    s = ld.aggregate(p, days=7, now=now, audit_state=audit)
+    assert set(s["insights"]) == {"jev", "routing", "outcomes", "listing", "audit", "visibility"}
+    assert "2 lines" in s["insights"]["outcomes"] and s["insights"]["outcomes"].endswith("too early.")
+    assert s["confidence"]["outcomes"] == {"n": 2, "badge": "too early"}
+    assert s["confidence"]["jev"]["n"] == 5
+    assert 1 <= len(s["actions"]) <= 6
+    assert s["ignored"] == []                          # nothing shown 3 times
+    # beta and gamma were shortlisted on p2, Claude loaded alpha there instead → missed
+    _jsonl(p.router_log, [{"ts": _iso(now - 54), "type": "invoke", "skill": "alpha-skill",
+                           "session_id": "s", "prompt_id": "p2"}])
+    s = ld.aggregate(p, days=7, now=now)
+    assert s["missed"] == [{"skill": "alpha-skill", "times": 1}]
+    html = ld.page(s)
+    assert "DO THIS NEXT" in html.upper() and "IGNORED" in html.upper()
+
+
+def test_no_prompt_text(tmp_path: Path) -> None:
+    now = time.time()
+    p = _fixture(tmp_path, now)
+    _jsonl(p.router_log, [{"ts": _iso(now - 54), "type": "invoke", "skill": "gamma-skill",
+                           "session_id": "s", "prompt_id": "p2", "tokens": [SECRET_WORD]}])
+    s = ld.aggregate(p, days=7, now=now)
+    blob = json.dumps({k: s[k] for k in ("insights", "actions", "ignored", "missed", "confidence")})
+    assert SECRET_WORD not in blob and "tokens" not in blob
+
+
 def test_binds_localhost_only() -> None:
     with pytest.raises(ValueError):
         ld.make_server(0, 7, host="0.0.0.0")
